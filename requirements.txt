@@ -5,6 +5,5 @@ pyvips
 Pillow
 realesrgan
 basicsr
-torch
-torchvision
 beautifulsoup4
+opencv-python-headless

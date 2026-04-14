@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
 
 # Install libvips and system deps
 RUN apt-get update && apt-get install -y \
@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Install Python deps
+# Install Python deps (torch already in base image)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

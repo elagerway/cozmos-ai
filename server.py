@@ -65,17 +65,25 @@ if not os.path.exists(model_path):
     url = "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"
     urllib.request.urlretrieve(url, model_path)
 
-device = "mps" if torch.backends.mps.is_available() else "cpu"
-print(f"Using device: {device}")
+if torch.cuda.is_available():
+    device = "cuda"
+    use_half = True  # FP16 on GPU for 2x speed
+elif torch.backends.mps.is_available():
+    device = "mps"
+    use_half = False
+else:
+    device = "cpu"
+    use_half = False
+print(f"Using device: {device}, half precision: {use_half}")
 
 upsampler = RealESRGANer(
     scale=4,
     model_path=model_path,
     model=model,
-    tile=512,
+    tile=0 if device == "cuda" else 512,  # No tiling needed on GPU
     tile_pad=10,
     pre_pad=0,
-    half=False,
+    half=use_half,
     device=device,
 )
 print("Model loaded.")
