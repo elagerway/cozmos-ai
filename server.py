@@ -111,7 +111,7 @@ async def scrape_brand_images(brand: str) -> list[bytes]:
         timeout=10.0,
         headers={"User-Agent": "Mozilla/5.0"},
     ) as client:
-        for url in candidates[:20]:
+        for url in candidates[:40]:
             try:
                 resp = await client.get(url)
                 if resp.status_code != 200:
@@ -126,7 +126,7 @@ async def scrape_brand_images(brand: str) -> list[bytes]:
                 except Exception:
                     continue
                 images.append(data)
-                if len(images) >= 12:
+                if len(images) >= 24:
                     break
             except Exception:
                 continue
@@ -216,13 +216,16 @@ async def upscale_all_parallel(images: list[bytes], on_progress=None) -> list[by
 
 
 def compose_panorama(images: list[bytes], bg_color: list[int]) -> pyvips.Image:
-    """Compose upscaled images into a 16K equirectangular panorama."""
-    PAD = 80
-    canvas = pyvips.Image.black(CANVAS_W, CANVAS_H, bands=3) + bg_color
+    """Compose upscaled images wall-to-wall into a 16K equirectangular panorama.
 
+    Every pixel of the canvas is covered by brand imagery — no dead space,
+    no background gaps. Images are scaled to fill their cells completely
+    (crop to fit, not letterbox). The result looks like being inside a
+    space where every surface is covered in brand content.
+    """
     n = len(images)
     if n == 0:
-        return canvas
+        return pyvips.Image.black(CANVAS_W, CANVAS_H, bands=3) + bg_color
 
     def load_img(data: bytes) -> pyvips.Image:
         img = pyvips.Image.new_from_buffer(data, "")
@@ -230,39 +233,60 @@ def compose_panorama(images: list[bytes], bg_color: list[int]) -> pyvips.Image:
             img = img[:3]
         return img
 
-    heroes = images[:3] if n >= 3 else images
-    products = images[3:] if n > 3 else []
+    # Determine grid layout to cover the full canvas
+    # We want enough cells to use all images, arranged to fill 16384x8192
+    # Target: 2:1 aspect ratio canvas, so cols ~= 2 * rows
+    import math
+    rows = max(2, int(math.sqrt(n / 2)))
+    cols = max(3, math.ceil(n / rows))
+    # Ensure we have enough cells
+    while rows * cols < n:
+        cols += 1
 
-    # Top row: heroes
-    top_h = CANVAS_H // 2 - PAD
-    top_cell_w = (CANVAS_W - PAD * (len(heroes) + 1)) // max(len(heroes), 1)
+    cell_w = CANVAS_W // cols
+    cell_h = CANVAS_H // rows
 
-    for i, img_bytes in enumerate(heroes):
-        img = load_img(img_bytes)
-        scale = min(top_cell_w / img.width, top_h / img.height)
+    # Start with a solid background (only visible if rounding leaves gaps)
+    canvas = pyvips.Image.black(CANVAS_W, CANVAS_H, bands=3) + bg_color
+
+    for idx in range(min(rows * cols, n)):
+        r = idx // cols
+        c = idx % cols
+
+        img = load_img(images[idx % len(images)])
+
+        # Scale to FILL the cell (cover, not contain) — crop excess
+        scale = max(cell_w / img.width, cell_h / img.height)
         resized = img.resize(scale, kernel=pyvips.enums.Kernel.LANCZOS3)
-        x = PAD + i * (top_cell_w + PAD) + (top_cell_w - resized.width) // 2
-        y = PAD + (top_h - resized.height) // 2
-        canvas = canvas.insert(resized, x, y)
 
-    # Bottom: products
-    if products:
-        bot_start = CANVAS_H // 2 + PAD // 2
-        bot_h_total = CANVAS_H - bot_start - PAD
-        cols = min(len(products), 5)
-        rows = (len(products) + cols - 1) // cols
-        row_h = (bot_h_total - PAD * (rows - 1)) // max(rows, 1)
-        cell_w = (CANVAS_W - PAD * (cols + 1)) // cols
+        # Crop to exact cell size, centered
+        crop_x = max(0, (resized.width - cell_w) // 2)
+        crop_y = max(0, (resized.height - cell_h) // 2)
+        cropped = resized.crop(crop_x, crop_y,
+                               min(cell_w, resized.width),
+                               min(cell_h, resized.height))
 
-        for idx, img_bytes in enumerate(products):
+        x = c * cell_w
+        y = r * cell_h
+        canvas = canvas.insert(cropped, x, y)
+
+    # If we have fewer images than cells, repeat images to fill remaining cells
+    total_cells = rows * cols
+    if n < total_cells:
+        for idx in range(n, total_cells):
             r = idx // cols
             c = idx % cols
-            img = load_img(img_bytes)
-            scale = min(cell_w / img.width, row_h / img.height)
+            img = load_img(images[idx % n])
+            scale = max(cell_w / img.width, cell_h / img.height)
             resized = img.resize(scale, kernel=pyvips.enums.Kernel.LANCZOS3)
-            x = PAD + c * (cell_w + PAD) + (cell_w - resized.width) // 2
-            y = bot_start + r * (row_h + PAD) + (row_h - resized.height) // 2
-            canvas = canvas.insert(resized, x, y)
+            crop_x = max(0, (resized.width - cell_w) // 2)
+            crop_y = max(0, (resized.height - cell_h) // 2)
+            cropped = resized.crop(crop_x, crop_y,
+                                   min(cell_w, resized.width),
+                                   min(cell_h, resized.height))
+            x = c * cell_w
+            y = r * cell_h
+            canvas = canvas.insert(cropped, x, y)
 
     return canvas
 
