@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+httpx
+pyvips
+Pillow
+realesrgan
+basicsr
+torch
+torchvision
+beautifulsoup4
