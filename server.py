@@ -7,11 +7,11 @@ Usage (local):
     FAL_KEY=... DYLD_LIBRARY_PATH=/opt/homebrew/lib python3 pipeline/server.py
 """
 
+from dotenv import load_dotenv
+load_dotenv()
 import os
 import sys
 import time
-from dotenv import load_dotenv
-load_dotenv()
 import uuid
 import shutil
 import asyncio
@@ -66,6 +66,85 @@ generations: dict[str, dict] = {}
 executor = ThreadPoolExecutor(max_workers=2)
 
 
+async def scrape_images_from_url(url: str) -> list[bytes]:
+    """Scrape images from any URL."""
+    from bs4 import BeautifulSoup
+    from urllib.parse import urljoin
+
+    async with httpx.AsyncClient(
+        follow_redirects=True,
+        timeout=15.0,
+        headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
+    ) as client:
+        resp = await client.get(url)
+        html = resp.text
+
+    soup = BeautifulSoup(html, "html.parser")
+    img_tags = soup.find_all("img")
+
+    candidates = []
+    for img in img_tags:
+        src = img.get("src") or img.get("data-src") or img.get("data-lazy-src") or ""
+        if not src or "svg" in src or "data:" in src or "icon" in src.lower():
+            continue
+        if src.startswith("//"):
+            src = "https:" + src
+        elif src.startswith("/"):
+            src = urljoin(url, src)
+        if not src.startswith("http"):
+            continue
+        candidates.append(src)
+
+    # Also grab background images from style attributes and srcset
+    for tag in soup.find_all(attrs={"srcset": True}):
+        srcset = tag.get("srcset", "")
+        for part in srcset.split(","):
+            src = part.strip().split(" ")[0]
+            if src.startswith("//"):
+                src = "https:" + src
+            elif src.startswith("/"):
+                src = urljoin(url, src)
+            if src.startswith("http") and "svg" not in src:
+                candidates.append(src)
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            unique.append(c)
+    candidates = unique
+
+    images = []
+    async with httpx.AsyncClient(
+        follow_redirects=True,
+        timeout=10.0,
+        headers={"User-Agent": "Mozilla/5.0"},
+    ) as client:
+        for img_url in candidates[:30]:
+            try:
+                resp = await client.get(img_url)
+                if resp.status_code != 200:
+                    continue
+                data = resp.content
+                if len(data) < 5000:
+                    continue
+                try:
+                    img = Image.open(BytesIO(data))
+                    if img.width < 200 or img.height < 200:
+                        continue
+                except Exception:
+                    continue
+                images.append(data)
+                if len(images) >= 12:
+                    break
+            except Exception:
+                continue
+
+    return images
+
+
 async def scrape_brand_images(brand: str) -> list[bytes]:
     """Scrape product images from a brand's website."""
     urls_to_try = {
@@ -77,63 +156,11 @@ async def scrape_brand_images(brand: str) -> list[bytes]:
     }
 
     base_url = urls_to_try.get(brand, f"https://www.{brand}.com")
+    images = await scrape_images_from_url(base_url)
 
-    async with httpx.AsyncClient(
-        follow_redirects=True,
-        timeout=15.0,
-        headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
-    ) as client:
-        resp = await client.get(base_url)
-        html = resp.text
-
-    from bs4 import BeautifulSoup
-    from urllib.parse import urljoin
-
-    soup = BeautifulSoup(html, "html.parser")
-    img_tags = soup.find_all("img")
-
-    candidates = []
-    for img in img_tags:
-        src = img.get("src") or img.get("data-src") or ""
-        if not src or "svg" in src or "data:" in src or "icon" in src.lower():
-            continue
-        if src.startswith("//"):
-            src = "https:" + src
-        elif src.startswith("/"):
-            src = urljoin(base_url, src)
-        if not src.startswith("http"):
-            continue
-        # Request higher res for Nike CDN
-        if "static.nike.com" in src:
-            src = src.replace("dpr_1.0", "dpr_2.0").replace("h_600", "h_1200")
-        candidates.append(src)
-
-    # Download top 12 images
-    images = []
-    async with httpx.AsyncClient(
-        follow_redirects=True,
-        timeout=10.0,
-        headers={"User-Agent": "Mozilla/5.0"},
-    ) as client:
-        for url in candidates[:40]:
-            try:
-                resp = await client.get(url)
-                if resp.status_code != 200:
-                    continue
-                data = resp.content
-                if len(data) < 10000:
-                    continue
-                try:
-                    img = Image.open(BytesIO(data))
-                    if img.width < 300 or img.height < 300:
-                        continue
-                except Exception:
-                    continue
-                images.append(data)
-                if len(images) >= 24:
-                    break
-            except Exception:
-                continue
+    # For Nike, request higher-res CDN images if we got few results
+    if not images and brand == "nike":
+        images = await scrape_images_from_url("https://www.nike.com/w/mens-shoes-nik1zy7ok")
 
     return images
 
@@ -220,16 +247,13 @@ async def upscale_all_parallel(images: list[bytes], on_progress=None) -> list[by
 
 
 def compose_panorama(images: list[bytes], bg_color: list[int]) -> pyvips.Image:
-    """Compose upscaled images wall-to-wall into a 16K equirectangular panorama.
+    """Compose upscaled images into a 16K equirectangular panorama."""
+    PAD = 80
+    canvas = pyvips.Image.black(CANVAS_W, CANVAS_H, bands=3) + bg_color
 
-    Every pixel of the canvas is covered by brand imagery — no dead space,
-    no background gaps. Images are scaled to fill their cells completely
-    (crop to fit, not letterbox). The result looks like being inside a
-    space where every surface is covered in brand content.
-    """
     n = len(images)
     if n == 0:
-        return pyvips.Image.black(CANVAS_W, CANVAS_H, bands=3) + bg_color
+        return canvas
 
     def load_img(data: bytes) -> pyvips.Image:
         img = pyvips.Image.new_from_buffer(data, "")
@@ -237,60 +261,39 @@ def compose_panorama(images: list[bytes], bg_color: list[int]) -> pyvips.Image:
             img = img[:3]
         return img
 
-    # Determine grid layout to cover the full canvas
-    # We want enough cells to use all images, arranged to fill 16384x8192
-    # Target: 2:1 aspect ratio canvas, so cols ~= 2 * rows
-    import math
-    rows = max(2, int(math.sqrt(n / 2)))
-    cols = max(3, math.ceil(n / rows))
-    # Ensure we have enough cells
-    while rows * cols < n:
-        cols += 1
+    heroes = images[:3] if n >= 3 else images
+    products = images[3:] if n > 3 else []
 
-    cell_w = CANVAS_W // cols
-    cell_h = CANVAS_H // rows
+    # Top row: heroes
+    top_h = CANVAS_H // 2 - PAD
+    top_cell_w = (CANVAS_W - PAD * (len(heroes) + 1)) // max(len(heroes), 1)
 
-    # Start with a solid background (only visible if rounding leaves gaps)
-    canvas = pyvips.Image.black(CANVAS_W, CANVAS_H, bands=3) + bg_color
-
-    for idx in range(min(rows * cols, n)):
-        r = idx // cols
-        c = idx % cols
-
-        img = load_img(images[idx % len(images)])
-
-        # Scale to FILL the cell (cover, not contain) — crop excess
-        scale = max(cell_w / img.width, cell_h / img.height)
+    for i, img_bytes in enumerate(heroes):
+        img = load_img(img_bytes)
+        scale = min(top_cell_w / img.width, top_h / img.height)
         resized = img.resize(scale, kernel=pyvips.enums.Kernel.LANCZOS3)
+        x = PAD + i * (top_cell_w + PAD) + (top_cell_w - resized.width) // 2
+        y = PAD + (top_h - resized.height) // 2
+        canvas = canvas.insert(resized, x, y)
 
-        # Crop to exact cell size, centered
-        crop_x = max(0, (resized.width - cell_w) // 2)
-        crop_y = max(0, (resized.height - cell_h) // 2)
-        cropped = resized.crop(crop_x, crop_y,
-                               min(cell_w, resized.width),
-                               min(cell_h, resized.height))
+    # Bottom: products
+    if products:
+        bot_start = CANVAS_H // 2 + PAD // 2
+        bot_h_total = CANVAS_H - bot_start - PAD
+        cols = min(len(products), 5)
+        rows = (len(products) + cols - 1) // cols
+        row_h = (bot_h_total - PAD * (rows - 1)) // max(rows, 1)
+        cell_w = (CANVAS_W - PAD * (cols + 1)) // cols
 
-        x = c * cell_w
-        y = r * cell_h
-        canvas = canvas.insert(cropped, x, y)
-
-    # If we have fewer images than cells, repeat images to fill remaining cells
-    total_cells = rows * cols
-    if n < total_cells:
-        for idx in range(n, total_cells):
+        for idx, img_bytes in enumerate(products):
             r = idx // cols
             c = idx % cols
-            img = load_img(images[idx % n])
-            scale = max(cell_w / img.width, cell_h / img.height)
+            img = load_img(img_bytes)
+            scale = min(cell_w / img.width, row_h / img.height)
             resized = img.resize(scale, kernel=pyvips.enums.Kernel.LANCZOS3)
-            crop_x = max(0, (resized.width - cell_w) // 2)
-            crop_y = max(0, (resized.height - cell_h) // 2)
-            cropped = resized.crop(crop_x, crop_y,
-                                   min(cell_w, resized.width),
-                                   min(cell_h, resized.height))
-            x = c * cell_w
-            y = r * cell_h
-            canvas = canvas.insert(cropped, x, y)
+            x = PAD + c * (cell_w + PAD) + (cell_w - resized.width) // 2
+            y = bot_start + r * (row_h + PAD) + (row_h - resized.height) // 2
+            canvas = canvas.insert(resized, x, y)
 
     return canvas
 
@@ -340,7 +343,6 @@ def save_generation_record(gen_id: str, data: dict):
 
 def generate_tiles(canvas: pyvips.Image, sphere_id: str, upload: bool = True) -> str:
     """Generate tile pyramid and optionally upload to Supabase Storage."""
-    # Also save locally
     sphere_tiles_dir = TILES_DIR / sphere_id
     if sphere_tiles_dir.exists():
         shutil.rmtree(sphere_tiles_dir)
@@ -386,7 +388,7 @@ def generate_tiles(canvas: pyvips.Image, sphere_id: str, upload: bool = True) ->
     return sphere_id
 
 
-def run_pipeline(gen_id: str, brand: str):
+def run_pipeline(gen_id: str, brand: str, source_url: str = ""):
     """Run the full pipeline."""
     start = time.time()
 
@@ -395,9 +397,13 @@ def run_pipeline(gen_id: str, brand: str):
 
     try:
         # Step 1: Scrape
-        update("scrape", 5, f"Scanning @{brand}...")
         loop = asyncio.new_event_loop()
-        raw_images = loop.run_until_complete(scrape_brand_images(brand))
+        if source_url:
+            update("scrape", 5, f"Scanning {source_url[:50]}...")
+            raw_images = loop.run_until_complete(scrape_images_from_url(source_url))
+        else:
+            update("scrape", 5, f"Scanning @{brand}...")
+            raw_images = loop.run_until_complete(scrape_brand_images(brand))
         update("scrape", 10, f"Found {len(raw_images)} images")
 
         if not raw_images:
@@ -432,7 +438,6 @@ def run_pipeline(gen_id: str, brand: str):
         update("save", 96, "Saving to cloud...")
         duration = int(time.time() - start)
 
-        # Build CDN URLs for tiles
         if SUPABASE_URL:
             tile_base_url = f"{SUPABASE_URL}/storage/v1/object/public/spheres"
             image_url = f"{tile_base_url}/{gen_id}.jpg"
@@ -440,7 +445,6 @@ def run_pipeline(gen_id: str, brand: str):
             tile_base_url = ""
             image_url = f"/spheres/{gen_id}.jpg"
 
-        # Save generation record to DB
         save_generation_record(gen_id, {
             "brand": brand,
             "prompt": generations[gen_id].get("prompt", ""),
@@ -477,14 +481,16 @@ def run_pipeline(gen_id: str, brand: str):
 
 @app.post("/generate")
 async def generate(body: dict):
-    """Start sphere generation from a brand handle."""
+    """Start sphere generation from a brand handle or URL."""
     brand = body.get("brand", "").strip().lower().replace("@", "")
     prompt = body.get("prompt", "")
+    source_url = body.get("url", "").strip()
 
-    if not brand:
-        return JSONResponse({"error": "brand is required"}, status_code=400)
+    if not brand and not source_url:
+        return JSONResponse({"error": "brand or url is required"}, status_code=400)
 
-    gen_id = f"gen-{brand}-{uuid.uuid4().hex[:8]}"
+    slug = brand or "custom"
+    gen_id = f"gen-{slug}-{uuid.uuid4().hex[:8]}"
     generations[gen_id] = {
         "id": gen_id,
         "brand": brand,
@@ -495,7 +501,7 @@ async def generate(body: dict):
         "label": "Starting...",
     }
 
-    executor.submit(run_pipeline, gen_id, brand)
+    executor.submit(run_pipeline, gen_id, brand, source_url)
     return {"id": gen_id}
 
 
