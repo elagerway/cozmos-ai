@@ -18,8 +18,6 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
-import cv2
-import numpy as np
 import pyvips
 import httpx
 from fastapi import FastAPI
@@ -121,9 +119,11 @@ async def scrape_brand_images(brand: str) -> list[bytes]:
                 data = resp.content
                 if len(data) < 10000:
                     continue
-                arr = np.frombuffer(data, np.uint8)
-                img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-                if img is None or img.shape[0] < 300 or img.shape[1] < 300:
+                try:
+                    img = Image.open(BytesIO(data))
+                    if img.width < 300 or img.height < 300:
+                        continue
+                except Exception:
                     continue
                 images.append(data)
                 if len(images) >= 12:
@@ -191,22 +191,18 @@ async def upscale_image_fal(img_bytes: bytes) -> bytes:
         return img_resp.content
 
 
-async def upscale_all_parallel(images: list[bytes], on_progress=None) -> list[np.ndarray]:
+async def upscale_all_parallel(images: list[bytes], on_progress=None) -> list[bytes]:
     """Upscale all images in parallel via fal.ai."""
-    results = []
+    results: list[bytes] = []
     tasks = [upscale_image_fal(img) for img in images]
     completed = 0
 
     for coro in asyncio.as_completed(tasks):
         try:
             upscaled_bytes = await coro
-            arr = np.frombuffer(upscaled_bytes, np.uint8)
-            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-            if img is not None:
-                results.append(img)
+            results.append(upscaled_bytes)
         except Exception as e:
             print(f"  Upscale failed: {e}")
-            # Use original if upscale fails
         completed += 1
         if on_progress:
             on_progress(completed, len(images))
@@ -214,15 +210,12 @@ async def upscale_all_parallel(images: list[bytes], on_progress=None) -> list[np
     # If some upscales failed, fill with originals
     if len(results) < len(images):
         for i in range(len(results), len(images)):
-            arr = np.frombuffer(images[i], np.uint8)
-            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-            if img is not None:
-                results.append(img)
+            results.append(images[i])
 
     return results
 
 
-def compose_panorama(images: list[np.ndarray], bg_color: list[int]) -> pyvips.Image:
+def compose_panorama(images: list[bytes], bg_color: list[int]) -> pyvips.Image:
     """Compose upscaled images into a 16K equirectangular panorama."""
     PAD = 80
     canvas = pyvips.Image.black(CANVAS_W, CANVAS_H, bands=3) + bg_color
@@ -231,6 +224,12 @@ def compose_panorama(images: list[np.ndarray], bg_color: list[int]) -> pyvips.Im
     if n == 0:
         return canvas
 
+    def load_img(data: bytes) -> pyvips.Image:
+        img = pyvips.Image.new_from_buffer(data, "")
+        if img.bands == 4:
+            img = img[:3]
+        return img
+
     heroes = images[:3] if n >= 3 else images
     products = images[3:] if n > 3 else []
 
@@ -238,12 +237,8 @@ def compose_panorama(images: list[np.ndarray], bg_color: list[int]) -> pyvips.Im
     top_h = CANVAS_H // 2 - PAD
     top_cell_w = (CANVAS_W - PAD * (len(heroes) + 1)) // max(len(heroes), 1)
 
-    for i, img_np in enumerate(heroes):
-        if img_np.shape[2] == 4:
-            img_np = img_np[:, :, :3]
-        img = pyvips.Image.new_from_memory(
-            img_np.tobytes(), img_np.shape[1], img_np.shape[0], 3, "uchar"
-        )
+    for i, img_bytes in enumerate(heroes):
+        img = load_img(img_bytes)
         scale = min(top_cell_w / img.width, top_h / img.height)
         resized = img.resize(scale, kernel=pyvips.enums.Kernel.LANCZOS3)
         x = PAD + i * (top_cell_w + PAD) + (top_cell_w - resized.width) // 2
@@ -259,14 +254,10 @@ def compose_panorama(images: list[np.ndarray], bg_color: list[int]) -> pyvips.Im
         row_h = (bot_h_total - PAD * (rows - 1)) // max(rows, 1)
         cell_w = (CANVAS_W - PAD * (cols + 1)) // cols
 
-        for idx, img_np in enumerate(products):
+        for idx, img_bytes in enumerate(products):
             r = idx // cols
             c = idx % cols
-            if img_np.shape[2] == 4:
-                img_np = img_np[:, :, :3]
-            img = pyvips.Image.new_from_memory(
-                img_np.tobytes(), img_np.shape[1], img_np.shape[0], 3, "uchar"
-            )
+            img = load_img(img_bytes)
             scale = min(cell_w / img.width, row_h / img.height)
             resized = img.resize(scale, kernel=pyvips.enums.Kernel.LANCZOS3)
             x = PAD + c * (cell_w + PAD) + (cell_w - resized.width) // 2
