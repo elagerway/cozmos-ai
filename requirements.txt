@@ -3,7 +3,5 @@ uvicorn[standard]
 httpx
 pyvips
 Pillow
-realesrgan
-basicsr
 beautifulsoup4
-opencv-python-headless
+fal-client

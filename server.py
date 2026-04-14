@@ -1,47 +1,42 @@
 """
 Sphere generation pipeline server.
-Scrapes brand images, upscales with Real-ESRGAN, composes 16K equirectangular panorama,
-generates tile pyramid for progressive loading.
+Scrapes brand images, upscales via fal.ai GPU API, composes 16K equirectangular
+panorama with pyvips, generates tile pyramid for progressive loading.
 
-Usage:
-    DYLD_LIBRARY_PATH=/opt/homebrew/lib python3 pipeline/server.py
+Usage (local):
+    FAL_KEY=... DYLD_LIBRARY_PATH=/opt/homebrew/lib python3 pipeline/server.py
 """
 
 import os
 import sys
-import types
 import time
-import json
 import uuid
 import shutil
 import asyncio
+import base64
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-
-# Patch torchvision import before anything else
-import torchvision.transforms.functional as F
-fake = types.ModuleType("torchvision.transforms.functional_tensor")
-fake.rgb_to_grayscale = F.rgb_to_grayscale
-sys.modules["torchvision.transforms.functional_tensor"] = fake
+from io import BytesIO
 
 import cv2
 import numpy as np
-import torch
 import pyvips
 import httpx
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
-from realesrgan import RealESRGANer
-from basicsr.archs.rrdbnet_arch import RRDBNet
+from PIL import Image
 
 # --- Config ---
-# On Railway, use /data for persistent storage; locally, use public/spheres
 DATA_DIR = Path(os.environ.get("DATA_DIR", str(Path(__file__).parent.parent / "public" / "spheres")))
 SPHERES_DIR = DATA_DIR
 TILES_DIR = SPHERES_DIR / "tiles"
 SPHERES_DIR.mkdir(parents=True, exist_ok=True)
 TILES_DIR.mkdir(parents=True, exist_ok=True)
+
+FAL_KEY = os.environ.get("FAL_KEY", "")
+
 TILE_SIZE = 1024
 CANVAS_W = 16384
 CANVAS_H = 8192
@@ -51,42 +46,6 @@ LEVELS = [
     {"width": 8192, "cols": 8, "rows": 4},
     {"width": 16384, "cols": 16, "rows": 8},
 ]
-
-# --- Upscaler setup ---
-print("Loading Real-ESRGAN model...")
-model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
-
-model_path = os.path.expanduser("~/.cache/realesrgan/RealESRGAN_x4plus.pth")
-os.makedirs(os.path.dirname(model_path), exist_ok=True)
-
-if not os.path.exists(model_path):
-    print("Downloading model weights...")
-    import urllib.request
-    url = "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"
-    urllib.request.urlretrieve(url, model_path)
-
-if torch.cuda.is_available():
-    device = "cuda"
-    use_half = True  # FP16 on GPU for 2x speed
-elif torch.backends.mps.is_available():
-    device = "mps"
-    use_half = False
-else:
-    device = "cpu"
-    use_half = False
-print(f"Using device: {device}, half precision: {use_half}")
-
-upsampler = RealESRGANer(
-    scale=4,
-    model_path=model_path,
-    model=model,
-    tile=0 if device == "cuda" else 512,  # No tiling needed on GPU
-    tile_pad=10,
-    pre_pad=0,
-    half=use_half,
-    device=device,
-)
-print("Model loaded.")
 
 # --- FastAPI app ---
 app = FastAPI(title="Cozmos Sphere Pipeline")
@@ -98,7 +57,6 @@ app.add_middleware(
 )
 
 # Serve generated tiles as static files
-from fastapi.staticfiles import StaticFiles
 app.mount("/spheres", StaticFiles(directory=str(SPHERES_DIR)), name="spheres")
 
 # Track generation status
@@ -106,7 +64,7 @@ generations: dict[str, dict] = {}
 executor = ThreadPoolExecutor(max_workers=2)
 
 
-async def scrape_brand_images(brand: str) -> list[tuple[str, bytes]]:
+async def scrape_brand_images(brand: str) -> list[bytes]:
     """Scrape product images from a brand's website."""
     urls_to_try = {
         "nike": "https://www.nike.com",
@@ -126,8 +84,8 @@ async def scrape_brand_images(brand: str) -> list[tuple[str, bytes]]:
         resp = await client.get(base_url)
         html = resp.text
 
-    # Extract image URLs from HTML
     from bs4 import BeautifulSoup
+    from urllib.parse import urljoin
 
     soup = BeautifulSoup(html, "html.parser")
     img_tags = soup.find_all("img")
@@ -137,40 +95,37 @@ async def scrape_brand_images(brand: str) -> list[tuple[str, bytes]]:
         src = img.get("src") or img.get("data-src") or ""
         if not src or "svg" in src or "data:" in src or "icon" in src.lower():
             continue
-        # Make absolute
         if src.startswith("//"):
             src = "https:" + src
         elif src.startswith("/"):
-            from urllib.parse import urljoin
             src = urljoin(base_url, src)
         if not src.startswith("http"):
             continue
-        # Try to request higher res for Nike CDN
+        # Request higher res for Nike CDN
         if "static.nike.com" in src:
             src = src.replace("dpr_1.0", "dpr_2.0").replace("h_600", "h_1200")
         candidates.append(src)
 
-    # Download top 12 images, filter by minimum size
+    # Download top 12 images
     images = []
     async with httpx.AsyncClient(
         follow_redirects=True,
         timeout=10.0,
         headers={"User-Agent": "Mozilla/5.0"},
     ) as client:
-        for url in candidates[:20]:  # Try up to 20, keep best 12
+        for url in candidates[:20]:
             try:
                 resp = await client.get(url)
                 if resp.status_code != 200:
                     continue
                 data = resp.content
-                if len(data) < 10000:  # Skip tiny images
+                if len(data) < 10000:
                     continue
-                # Check dimensions
                 arr = np.frombuffer(data, np.uint8)
                 img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                 if img is None or img.shape[0] < 300 or img.shape[1] < 300:
                     continue
-                images.append((url, data))
+                images.append(data)
                 if len(images) >= 12:
                     break
             except Exception:
@@ -179,27 +134,103 @@ async def scrape_brand_images(brand: str) -> list[tuple[str, bytes]]:
     return images
 
 
-def upscale_image(img_bytes: bytes) -> np.ndarray:
-    """4x upscale a single image with Real-ESRGAN."""
-    arr = np.frombuffer(img_bytes, np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
-    if img.shape[2] == 4:
-        img = img[:, :, :3]
-    output, _ = upsampler.enhance(img, outscale=4)
-    return output
+async def upscale_image_fal(img_bytes: bytes) -> bytes:
+    """4x upscale a single image via fal.ai API."""
+    # Convert to PNG for upload
+    img = Image.open(BytesIO(img_bytes))
+    if img.mode == "RGBA":
+        img = img.convert("RGB")
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    data_uri = f"data:image/png;base64,{b64}"
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            "https://queue.fal.run/fal-ai/esrgan",
+            headers={
+                "Authorization": f"Key {FAL_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "image_url": data_uri,
+                "scale": 4,
+            },
+        )
+        resp.raise_for_status()
+        result = resp.json()
+
+        # Poll for result
+        request_id = result.get("request_id")
+        if request_id:
+            # Queue-based — poll status
+            while True:
+                status_resp = await client.get(
+                    f"https://queue.fal.run/fal-ai/esrgan/requests/{request_id}/status",
+                    headers={"Authorization": f"Key {FAL_KEY}"},
+                )
+                status = status_resp.json()
+                if status.get("status") == "COMPLETED":
+                    result_resp = await client.get(
+                        f"https://queue.fal.run/fal-ai/esrgan/requests/{request_id}",
+                        headers={"Authorization": f"Key {FAL_KEY}"},
+                    )
+                    result = result_resp.json()
+                    break
+                elif status.get("status") in ("FAILED", "CANCELLED"):
+                    raise Exception(f"fal.ai upscale failed: {status}")
+                await asyncio.sleep(0.5)
+
+    # Download the upscaled image
+    image_url = result.get("image", {}).get("url") or result.get("output", {}).get("url", "")
+    if not image_url:
+        raise Exception(f"No image URL in fal.ai response: {result}")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        img_resp = await client.get(image_url)
+        return img_resp.content
+
+
+async def upscale_all_parallel(images: list[bytes], on_progress=None) -> list[np.ndarray]:
+    """Upscale all images in parallel via fal.ai."""
+    results = []
+    tasks = [upscale_image_fal(img) for img in images]
+    completed = 0
+
+    for coro in asyncio.as_completed(tasks):
+        try:
+            upscaled_bytes = await coro
+            arr = np.frombuffer(upscaled_bytes, np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if img is not None:
+                results.append(img)
+        except Exception as e:
+            print(f"  Upscale failed: {e}")
+            # Use original if upscale fails
+        completed += 1
+        if on_progress:
+            on_progress(completed, len(images))
+
+    # If some upscales failed, fill with originals
+    if len(results) < len(images):
+        for i in range(len(results), len(images)):
+            arr = np.frombuffer(images[i], np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if img is not None:
+                results.append(img)
+
+    return results
 
 
 def compose_panorama(images: list[np.ndarray], bg_color: list[int]) -> pyvips.Image:
     """Compose upscaled images into a 16K equirectangular panorama."""
-    PAD = 60
-
+    PAD = 80
     canvas = pyvips.Image.black(CANVAS_W, CANVAS_H, bands=3) + bg_color
 
     n = len(images)
     if n == 0:
         return canvas
 
-    # Layout: top row = first 3 (heroes), bottom rows = rest
     heroes = images[:3] if n >= 3 else images
     products = images[3:] if n > 3 else []
 
@@ -208,6 +239,8 @@ def compose_panorama(images: list[np.ndarray], bg_color: list[int]) -> pyvips.Im
     top_cell_w = (CANVAS_W - PAD * (len(heroes) + 1)) // max(len(heroes), 1)
 
     for i, img_np in enumerate(heroes):
+        if img_np.shape[2] == 4:
+            img_np = img_np[:, :, :3]
         img = pyvips.Image.new_from_memory(
             img_np.tobytes(), img_np.shape[1], img_np.shape[0], 3, "uchar"
         )
@@ -217,18 +250,20 @@ def compose_panorama(images: list[np.ndarray], bg_color: list[int]) -> pyvips.Im
         y = PAD + (top_h - resized.height) // 2
         canvas = canvas.insert(resized, x, y)
 
-    # Bottom: products in rows
+    # Bottom: products
     if products:
         bot_start = CANVAS_H // 2 + PAD // 2
         bot_h_total = CANVAS_H - bot_start - PAD
         cols = min(len(products), 5)
         rows = (len(products) + cols - 1) // cols
-        row_h = (bot_h_total - PAD * (rows - 1)) // rows
+        row_h = (bot_h_total - PAD * (rows - 1)) // max(rows, 1)
         cell_w = (CANVAS_W - PAD * (cols + 1)) // cols
 
         for idx, img_np in enumerate(products):
             r = idx // cols
             c = idx % cols
+            if img_np.shape[2] == 4:
+                img_np = img_np[:, :, :3]
             img = pyvips.Image.new_from_memory(
                 img_np.tobytes(), img_np.shape[1], img_np.shape[0], 3, "uchar"
             )
@@ -273,7 +308,7 @@ def generate_tiles(canvas: pyvips.Image, sphere_id: str) -> str:
                 buf = tile.write_to_buffer(".jpg[Q=93]")
                 (level_dir / f"{c}_{r}.jpg").write_bytes(buf)
 
-    # Also save the full-res JPEG
+    # Full-res JPEG
     full_path = SPHERES_DIR / f"{sphere_id}.jpg"
     buf = canvas.write_to_buffer(".jpg[Q=95]")
     full_path.write_bytes(buf)
@@ -282,7 +317,7 @@ def generate_tiles(canvas: pyvips.Image, sphere_id: str) -> str:
 
 
 def run_pipeline(gen_id: str, brand: str):
-    """Run the full pipeline synchronously (called in thread pool)."""
+    """Run the full pipeline."""
     start = time.time()
 
     def update(step: str, pct: int, label: str):
@@ -293,41 +328,34 @@ def run_pipeline(gen_id: str, brand: str):
         update("scrape", 5, f"Scanning @{brand}...")
         loop = asyncio.new_event_loop()
         raw_images = loop.run_until_complete(scrape_brand_images(brand))
-        loop.close()
         update("scrape", 10, f"Found {len(raw_images)} images")
 
         if not raw_images:
             generations[gen_id].update({"status": "failed", "error": "No images found"})
+            loop.close()
             return
 
-        # Step 2: Upscale
-        upscaled = []
-        for i, (url, data) in enumerate(raw_images):
-            pct = 10 + int(60 * (i / len(raw_images)))
-            update("upscale", pct, f"Enhancing image {i+1}/{len(raw_images)}...")
-            try:
-                up = upscale_image(data)
-                upscaled.append(up)
-            except Exception as e:
-                print(f"  Upscale failed for image {i}: {e}")
-                # Use original if upscale fails
-                arr = np.frombuffer(data, np.uint8)
-                img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-                if img is not None:
-                    upscaled.append(img)
+        # Step 2: Upscale via fal.ai (parallel)
+        def on_upscale_progress(done, total):
+            pct = 10 + int(55 * (done / total))
+            update("upscale", pct, f"Enhancing image {done}/{total}...")
 
-        update("upscale", 70, f"Enhanced {len(upscaled)} images")
+        update("upscale", 12, f"Enhancing {len(raw_images)} images (GPU)...")
+        upscaled = loop.run_until_complete(
+            upscale_all_parallel(raw_images, on_progress=on_upscale_progress)
+        )
+        loop.close()
+        update("upscale", 65, f"Enhanced {len(upscaled)} images")
 
         # Step 3: Compose
-        update("compose", 75, "Composing sphere panorama...")
-        bg_color = [17, 17, 17]  # Default dark
+        update("compose", 70, "Composing sphere panorama...")
+        bg_color = [17, 17, 17]
         canvas = compose_panorama(upscaled, bg_color)
-        update("compose", 85, "Panorama composed")
+        update("compose", 80, "Panorama composed")
 
         # Step 4: Tiles
-        update("tiles", 88, "Generating tile pyramid...")
-        sphere_id = gen_id
-        generate_tiles(canvas, sphere_id)
+        update("tiles", 82, "Generating tile pyramid...")
+        generate_tiles(canvas, gen_id)
         update("tiles", 95, "Tiles generated")
 
         # Done
@@ -337,8 +365,8 @@ def run_pipeline(gen_id: str, brand: str):
             "step": "done",
             "pct": 100,
             "label": "Your sphere is ready",
-            "image_url": f"/spheres/{sphere_id}.jpg",
-            "tile_stem": sphere_id,
+            "image_url": f"/spheres/{gen_id}.jpg",
+            "tile_stem": gen_id,
             "duration_s": duration,
             "image_count": len(upscaled),
         })
@@ -352,7 +380,7 @@ def run_pipeline(gen_id: str, brand: str):
 
 
 @app.post("/generate")
-async def generate(body: dict, background_tasks: BackgroundTasks):
+async def generate(body: dict):
     """Start sphere generation from a brand handle."""
     brand = body.get("brand", "").strip().lower().replace("@", "")
     prompt = body.get("prompt", "")
@@ -371,9 +399,7 @@ async def generate(body: dict, background_tasks: BackgroundTasks):
         "label": "Starting...",
     }
 
-    # Run pipeline in background thread
     executor.submit(run_pipeline, gen_id, brand)
-
     return {"id": gen_id}
 
 
@@ -387,10 +413,12 @@ async def status(gen_id: str):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "device": device}
+    return {"status": "ok", "fal_key_set": bool(FAL_KEY)}
 
 
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8100))
+    print(f"Starting pipeline server on port {port}")
+    print(f"FAL_KEY: {'set' if FAL_KEY else 'NOT SET'}")
     uvicorn.run(app, host="0.0.0.0", port=port)
