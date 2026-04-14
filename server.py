@@ -10,6 +10,8 @@ Usage (local):
 import os
 import sys
 import time
+from dotenv import load_dotenv
+load_dotenv()
 import uuid
 import shutil
 import asyncio
@@ -34,6 +36,8 @@ SPHERES_DIR.mkdir(parents=True, exist_ok=True)
 TILES_DIR.mkdir(parents=True, exist_ok=True)
 
 FAL_KEY = os.environ.get("FAL_KEY", "")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 
 TILE_SIZE = 1024
 CANVAS_W = 16384
@@ -291,8 +295,52 @@ def compose_panorama(images: list[bytes], bg_color: list[int]) -> pyvips.Image:
     return canvas
 
 
-def generate_tiles(canvas: pyvips.Image, sphere_id: str) -> str:
-    """Generate tile pyramid from panorama canvas."""
+def upload_to_supabase(path: str, data: bytes, content_type: str = "image/jpeg"):
+    """Upload a file to Supabase Storage 'spheres' bucket."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return None
+    import requests
+    url = f"{SUPABASE_URL}/storage/v1/object/spheres/{path}"
+    resp = requests.post(
+        url,
+        headers={
+            "apikey": SUPABASE_SERVICE_KEY,
+            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+            "Content-Type": content_type,
+            "x-upsert": "true",
+        },
+        data=data,
+    )
+    if resp.status_code in (200, 201):
+        return f"{SUPABASE_URL}/storage/v1/object/public/spheres/{path}"
+    else:
+        print(f"  Upload failed for {path}: {resp.status_code} {resp.text[:200]}")
+        return None
+
+
+def save_generation_record(gen_id: str, data: dict):
+    """Save a generation record to Supabase."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return
+    import requests
+    url = f"{SUPABASE_URL}/rest/v1/generations"
+    resp = requests.post(
+        url,
+        headers={
+            "apikey": SUPABASE_SERVICE_KEY,
+            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        },
+        json={"id": gen_id, **data},
+    )
+    if resp.status_code not in (200, 201, 204):
+        print(f"  DB save failed: {resp.status_code} {resp.text[:200]}")
+
+
+def generate_tiles(canvas: pyvips.Image, sphere_id: str, upload: bool = True) -> str:
+    """Generate tile pyramid and optionally upload to Supabase Storage."""
+    # Also save locally
     sphere_tiles_dir = TILES_DIR / sphere_id
     if sphere_tiles_dir.exists():
         shutil.rmtree(sphere_tiles_dir)
@@ -306,6 +354,8 @@ def generate_tiles(canvas: pyvips.Image, sphere_id: str) -> str:
     )
     buf = base.write_to_buffer(".jpg[Q=82]")
     (sphere_tiles_dir / "base.jpg").write_bytes(buf)
+    if upload:
+        upload_to_supabase(f"tiles/{sphere_id}/base.jpg", buf)
 
     # Tile levels
     for li, level in enumerate(LEVELS):
@@ -322,11 +372,16 @@ def generate_tiles(canvas: pyvips.Image, sphere_id: str) -> str:
                 tile = limg.crop(c * TILE_SIZE, r * TILE_SIZE, TILE_SIZE, TILE_SIZE)
                 buf = tile.write_to_buffer(".jpg[Q=93]")
                 (level_dir / f"{c}_{r}.jpg").write_bytes(buf)
+                if upload:
+                    upload_to_supabase(f"tiles/{sphere_id}/{li}/{c}_{r}.jpg", buf)
 
-    # Full-res JPEG
+    # 8K JPEG (within JPEG limits)
+    img_8k = canvas.resize(8192 / canvas.width, kernel=pyvips.enums.Kernel.LANCZOS3, vscale=4096 / canvas.height)
+    buf = img_8k.write_to_buffer(".jpg[Q=93]")
     full_path = SPHERES_DIR / f"{sphere_id}.jpg"
-    buf = canvas.write_to_buffer(".jpg[Q=95]")
     full_path.write_bytes(buf)
+    if upload:
+        upload_to_supabase(f"{sphere_id}.jpg", buf)
 
     return sphere_id
 
@@ -373,15 +428,41 @@ def run_pipeline(gen_id: str, brand: str):
         generate_tiles(canvas, gen_id)
         update("tiles", 95, "Tiles generated")
 
-        # Done
+        # Step 5: Save to Supabase
+        update("save", 96, "Saving to cloud...")
         duration = int(time.time() - start)
+
+        # Build CDN URLs for tiles
+        if SUPABASE_URL:
+            tile_base_url = f"{SUPABASE_URL}/storage/v1/object/public/spheres"
+            image_url = f"{tile_base_url}/{gen_id}.jpg"
+        else:
+            tile_base_url = ""
+            image_url = f"/spheres/{gen_id}.jpg"
+
+        # Save generation record to DB
+        save_generation_record(gen_id, {
+            "brand": brand,
+            "prompt": generations[gen_id].get("prompt", ""),
+            "status": "done",
+            "step": "done",
+            "step_label": "Your sphere is ready",
+            "image_url": image_url,
+            "tile_stem": gen_id,
+            "duration_s": duration,
+            "image_count": len(upscaled),
+            "cost_usd": round(len(upscaled) * 0.003, 4),
+        })
+
+        # Done
         generations[gen_id].update({
             "status": "done",
             "step": "done",
             "pct": 100,
             "label": "Your sphere is ready",
-            "image_url": f"/spheres/{gen_id}.jpg",
+            "image_url": image_url,
             "tile_stem": gen_id,
+            "tile_base_url": tile_base_url,
             "duration_s": duration,
             "image_count": len(upscaled),
         })

@@ -5,3 +5,5 @@ pyvips
 Pillow
 beautifulsoup4
 fal-client
+requests
+python-dotenv
