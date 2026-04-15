@@ -334,7 +334,11 @@ async def scrape_images_from_url(url: str) -> list[bytes]:
                 continue
 
     # Fallback: if not enough images, crawl internal pages and screenshot them
-    if len(images) < 6:
+    # Never screenshot social platforms that require auth
+    auth_domains = ["instagram.com", "facebook.com", "tiktok.com", "linkedin.com", "twitter.com", "x.com"]
+    is_auth_site = any(d in url for d in auth_domains)
+
+    if len(images) < 6 and not is_auth_site:
         print(f"  Only {len(images)} images found, crawling site pages for screenshots...")
         pages = await crawl_internal_links(url)
         print(f"  Found {len(pages)} pages to screenshot")
@@ -358,6 +362,11 @@ async def is_real_website(url: str) -> bool:
                 "godaddy", "forsale", "this domain", "buy this domain",
                 "parked", "domain for sale", "access denied", "403 forbidden",
                 "squarespace.com/buy", "namecheap", "dan.com",
+                "sign up for instagram", "log in to instagram", "profile isn't available",
+                "sign in", "log in", "create an account", "sign up",
+                "page not found", "404", "this page isn't available",
+                "verify your identity", "confirm your identity",
+                "suspicious activity", "unusual login",
             ]
             for signal in parked_signals:
                 if signal in text:
