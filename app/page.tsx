@@ -432,27 +432,6 @@ export default function HomePage() {
             )}
           </div>
 
-          {/* Sample brief chips */}
-          <div className="flex flex-wrap gap-2">
-            {allSampleBriefs.map((brief, i) => {
-              const isSocial = brief.includes("@")
-              return (
-                <button
-                  key={i}
-                  onClick={() => setPrompt(brief)}
-                  disabled={generating}
-                  className={`px-3 py-1.5 text-xs rounded-full transition-colors border truncate max-w-[300px] disabled:opacity-50 ${
-                    isSocial
-                      ? "bg-violet-500/5 text-violet-300/80 hover:bg-violet-500/10 hover:text-violet-200 border-violet-500/10"
-                      : "bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-foreground border-white/5"
-                  }`}
-                >
-                  {brief}
-                </button>
-              )
-            })}
-          </div>
-
           <Button
             onClick={handleGenerate}
             disabled={!prompt.trim() || generating}
@@ -469,6 +448,7 @@ export default function HomePage() {
             <div className="flex flex-wrap gap-2">
               {[
                 { stem: "env-bell-tower", label: "Bell Tower" },
+                { stem: "env-docklands", label: "Docklands" },
                 { stem: "env-rogland-night", label: "Clear Night Sky" },
                 { stem: "env-monkstown-castle", label: "Castle" },
                 { stem: "env-red-wall", label: "Red Wall" },
