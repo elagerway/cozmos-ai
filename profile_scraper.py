@@ -64,29 +64,39 @@ async def search_youtube_handle(name: str) -> str | None:
 
     try:
         async with httpx.AsyncClient(
-            follow_redirects=True, timeout=10.0,
+            follow_redirects=True, timeout=15.0,
             headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
         ) as client:
             resp = await client.get(search_url)
             if resp.status_code != 200:
                 return None
 
-            # Extract channel handles from search results
-            handles = re.findall(r'"channelHandleText":\{"runs":\[\{"text":"@([^"]+)"\}', resp.text)
-            if handles:
-                print(f"  YouTube search found handle: @{handles[0]}")
-                return handles[0]
-
-            # Try extracting channel URLs
+            # Extract channel IDs from search results (first result is usually the best match)
             channel_ids = re.findall(r'"channelId":"([^"]+)"', resp.text)
-            if channel_ids:
-                # Get the handle from the channel page
-                ch_resp = await client.get(f"https://www.youtube.com/channel/{channel_ids[0]}")
-                if ch_resp.status_code == 200:
-                    handle_match = re.search(r'"channelHandleText":\{"runs":\[\{"text":"@([^"]+)"\}', ch_resp.text)
-                    if handle_match:
-                        print(f"  YouTube search found handle via channel: @{handle_match.group(1)}")
-                        return handle_match.group(1)
+            if not channel_ids:
+                return None
+
+            # Visit the top channel to get its handle
+            ch_url = f"https://www.youtube.com/channel/{channel_ids[0]}"
+            print(f"  YouTube search: visiting {ch_url}...")
+            ch_resp = await client.get(ch_url)
+            if ch_resp.status_code == 200:
+                # Try multiple patterns for handle extraction
+                for pattern in [
+                    r'"vanityChannelUrl":"http[s]?://www\.youtube\.com/@([^"]+)"',
+                    r'"channelUrl":"http[s]?://www\.youtube\.com/@([^"]+)"',
+                    r'"canonicalBaseUrl":"/@([^"]+)"',
+                    r'"ownerUrls":\["http[s]?://www\.youtube\.com/@([^"]+)"\]',
+                ]:
+                    match = re.search(pattern, ch_resp.text)
+                    if match:
+                        handle = match.group(1)
+                        print(f"  YouTube search found handle: @{handle}")
+                        return handle
+
+                # Last resort: use the channel ID directly
+                print(f"  YouTube search: using channel ID as fallback")
+                return f"channel/{channel_ids[0]}"
     except Exception as e:
         print(f"  YouTube search failed: {e}")
 
@@ -97,11 +107,19 @@ async def scrape_youtube_channel(handle: str) -> YouTubeData | None:
     """Scrape YouTube channel data including videos, stats, and branding."""
     data = YouTubeData()
 
-    channel_urls = [
-        f"https://www.youtube.com/@{handle}",
-        f"https://www.youtube.com/c/{handle}",
-        f"https://www.youtube.com/{handle}",
-    ]
+    # Handle both @handle and channel/UCXXX formats
+    if handle.startswith("channel/"):
+        channel_urls = [
+            f"https://www.youtube.com/{handle}/videos",
+            f"https://www.youtube.com/{handle}",
+        ]
+    else:
+        channel_urls = [
+            f"https://www.youtube.com/@{handle}/videos",
+            f"https://www.youtube.com/c/{handle}/videos",
+            f"https://www.youtube.com/@{handle}",
+            f"https://www.youtube.com/c/{handle}",
+        ]
 
     async with httpx.AsyncClient(
         follow_redirects=True, timeout=15.0,
@@ -153,31 +171,65 @@ async def scrape_youtube_channel(handle: str) -> YouTubeData | None:
         if banner_match:
             data.banner_url = banner_match.group(1)
 
-        # Extract video IDs and titles
-        video_pattern = re.findall(
-            r'"videoId":"([a-zA-Z0-9_-]{11})".*?"title":\{"runs":\[\{"text":"([^"]{0,200})"\}',
-            html
-        )
-        seen_ids = set()
-        for vid_id, title in video_pattern:
-            if vid_id in seen_ids:
-                continue
-            seen_ids.add(vid_id)
-            data.videos.append(VideoData(
-                id=vid_id,
-                title=title,
-                thumbnail_url=f"https://img.youtube.com/vi/{vid_id}/maxresdefault.jpg",
-                view_count="",
-                url=f"https://www.youtube.com/watch?v={vid_id}",
-            ))
-            if len(data.videos) >= 12:
-                break
+        # Extract videos from richItemRenderer blocks (the /videos tab)
+        # Each block contains a videoId and title close together
+        import json as json_mod
 
-        # Extract view counts for videos
-        view_pattern = re.findall(r'"viewCountText":\{"simpleText":"([^"]+)"', html)
-        for i, views in enumerate(view_pattern):
-            if i < len(data.videos):
-                data.videos[i].view_count = views
+        # Try to find the video grid data in ytInitialData
+        init_match = re.search(r'var ytInitialData\s*=\s*(\{.+?\});', html)
+        if init_match:
+            try:
+                yt_data = json_mod.loads(init_match.group(1))
+                # Navigate to video list
+                tabs = yt_data.get("contents", {}).get("twoColumnBrowseResultsRenderer", {}).get("tabs", [])
+                for tab in tabs:
+                    tab_content = tab.get("tabRenderer", {}).get("content", {})
+                    items = (tab_content.get("richGridRenderer", {}).get("contents", []) or
+                             tab_content.get("sectionListRenderer", {}).get("contents", []))
+                    for item in items:
+                        renderer = (item.get("richItemRenderer", {}).get("content", {}).get("videoRenderer", {}) or
+                                   item.get("gridVideoRenderer", {}))
+                        vid_id = renderer.get("videoId", "")
+                        title_runs = renderer.get("title", {}).get("runs", [])
+                        title = title_runs[0].get("text", "") if title_runs else ""
+                        views_text = renderer.get("viewCountText", {}).get("simpleText", "")
+
+                        if vid_id and title and len(vid_id) == 11:
+                            data.videos.append(VideoData(
+                                id=vid_id,
+                                title=title,
+                                thumbnail_url=f"https://img.youtube.com/vi/{vid_id}/maxresdefault.jpg",
+                                view_count=views_text,
+                                url=f"https://www.youtube.com/watch?v={vid_id}",
+                            ))
+                            if len(data.videos) >= 12:
+                                break
+                    if data.videos:
+                        break
+            except Exception as e:
+                print(f"  JSON parse failed: {e}")
+
+        # Fallback: regex extraction if JSON parse didn't work
+        if not data.videos:
+            # Find videoId followed by title within ~500 chars
+            blocks = re.findall(r'"videoRenderer":\{[^}]*?"videoId":"([a-zA-Z0-9_-]{11})"[^}]*?"title":\{"runs":\[\{"text":"([^"]{1,200})"\}', html)
+            seen_ids = set()
+            for vid_id, title in blocks:
+                if vid_id in seen_ids or title in ("Want to join this channel?", "Posts"):
+                    continue
+                seen_ids.add(vid_id)
+                data.videos.append(VideoData(
+                    id=vid_id,
+                    title=title,
+                    thumbnail_url=f"https://img.youtube.com/vi/{vid_id}/maxresdefault.jpg",
+                    view_count="",
+                    url=f"https://www.youtube.com/watch?v={vid_id}",
+                ))
+                if len(data.videos) >= 12:
+                    break
+
+        # Filter out non-video entries
+        data.videos = [v for v in data.videos if v.title not in ("Want to join this channel?", "Posts", "")]
 
     if data.channel_name or data.videos:
         print(f"  YouTube: {data.channel_name} ({data.subscriber_count}), {len(data.videos)} videos")
