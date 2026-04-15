@@ -64,9 +64,11 @@ function ProfileCardHTML(data: ProfileMarkerData): string {
         </div>
       </div>
       ${data.bio ? `<p style="font-size:13px;color:rgba(255,255,255,0.7);line-height:1.5;margin:0 0 16px 0;">${data.bio.slice(0, 150)}${data.bio.length > 150 ? "..." : ""}</p>` : ""}
-      <div style="display:flex;gap:16px;font-size:12px;color:rgba(255,255,255,0.5);">
-        ${data.subscriber_count ? `<span>${data.subscriber_count} subscribers</span>` : ""}
-        ${data.twitter_handle ? `<span>@${data.twitter_handle}</span>` : ""}
+      <div style="display:flex;flex-wrap:wrap;gap:8px 16px;font-size:11px;color:rgba(255,255,255,0.5);">
+        ${data.subscriber_count ? `<span>YT: ${data.subscriber_count}</span>` : ""}
+        ${(data as any).instagram_handle ? `<span>IG: @${(data as any).instagram_handle}${(data as any).instagram_followers ? ` (${((data as any).instagram_followers / 1000000).toFixed(1)}M)` : ""}</span>` : ""}
+        ${data.twitter_handle ? `<span>X: @${data.twitter_handle}</span>` : ""}
+        ${(data as any).tiktok_handle ? `<span>TT: @${(data as any).tiktok_handle}${(data as any).tiktok_followers ? ` (${(data as any).tiktok_followers})` : ""}</span>` : ""}
       </div>
       ${data.channel_url ? `<a href="${data.channel_url}" target="_blank" style="
         display:inline-block;margin-top:16px;padding:8px 20px;
