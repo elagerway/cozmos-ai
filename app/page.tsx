@@ -430,35 +430,12 @@ export default function HomePage() {
                     <p className="text-sm font-medium text-white">
                       {gen.sphere_spec?.campaign_name || gen.prompt.slice(0, 50)}
                     </p>
-                    <p className="text-xs text-white/60 mt-0.5">
-                      ${gen.cost_usd?.toFixed(3)} &middot; {gen.duration_s}s
-                    </p>
                   </div>
                 </Link>
               ))}
             </div>
           </section>
 
-          {/* Stats */}
-          <section className="border-t border-white/5">
-            <div className="max-w-4xl mx-auto px-6 py-16 grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
-              {[
-                { value: "< 90s", label: "Generation time" },
-                { value: "$0.02", label: "Per generation" },
-                { value: "360°", label: "Interactive sphere" },
-                { value: "1-click", label: "Shareable link" },
-              ].map((stat) => (
-                <div key={stat.label}>
-                  <p className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">
-                    {stat.value}
-                  </p>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {stat.label}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </section>
         </>
       )}
 
