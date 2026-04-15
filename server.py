@@ -285,10 +285,35 @@ async def scrape_images_from_url(url: str) -> list[bytes]:
     return images
 
 
+async def is_real_website(url: str) -> bool:
+    """Check if a URL leads to a real website (not parked, error, or forsale page)."""
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=8.0,
+            headers={"User-Agent": "Mozilla/5.0"}) as client:
+            resp = await client.get(url)
+            if resp.status_code >= 400:
+                return False
+            text = resp.text.lower()
+            # Detect parked/forsale/error pages
+            parked_signals = [
+                "godaddy", "forsale", "this domain", "buy this domain",
+                "parked", "domain for sale", "access denied", "403 forbidden",
+                "squarespace.com/buy", "namecheap", "dan.com",
+            ]
+            for signal in parked_signals:
+                if signal in text:
+                    return False
+            return True
+    except Exception:
+        return False
+
+
 async def scrape_brand_images(brand: str) -> list[bytes]:
     """Scrape product images from a brand's website or social profiles.
 
-    Tries multiple sources: known URLs, brand.com, social platforms.
+    For known brands, tries their website first.
+    For unknown names (likely people/influencers), tries social platforms first.
+    Skips parked domains and error pages.
     """
     known_urls = {
         "nike": "https://www.nike.com",
@@ -304,17 +329,18 @@ async def scrape_brand_images(brand: str) -> list[bytes]:
         if images:
             return images
 
-    # Try www.brand.com
-    images = await scrape_images_from_url(f"https://www.{brand}.com")
-    if images:
-        return images
+    # For known brands, try website first; for unknown names, try socials first
+    is_known_brand = brand in known_urls
 
-    # Try brand.com without www
-    images = await scrape_images_from_url(f"https://{brand}.com")
-    if images:
-        return images
+    if is_known_brand:
+        # Try website
+        for url in [f"https://www.{brand}.com", f"https://{brand}.com"]:
+            if await is_real_website(url):
+                images = await scrape_images_from_url(url)
+                if images:
+                    return images
 
-    # Try social platforms — scrape their public profile pages
+    # Try social platforms
     social_urls = [
         f"https://www.instagram.com/{brand}/",
         f"https://x.com/{brand}",
@@ -328,6 +354,14 @@ async def scrape_brand_images(brand: str) -> list[bytes]:
         images = await scrape_images_from_url(social_url)
         if images:
             return images
+
+    # Last resort for unknown names: try website (might work for some)
+    if not is_known_brand:
+        for url in [f"https://www.{brand}.com", f"https://{brand}.com"]:
+            if await is_real_website(url):
+                images = await scrape_images_from_url(url)
+                if images:
+                    return images
 
     return []
 
