@@ -21,6 +21,9 @@ from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
 import pyvips
+# Limit vips memory usage and concurrency for Railway
+pyvips.cache_set_max_mem(100 * 1024 * 1024)  # 100MB cache max
+pyvips.cache_set_max(50)
 import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -223,10 +226,16 @@ async def upscale_image_fal(img_bytes: bytes) -> bytes:
 
 
 async def upscale_all_parallel(images: list[bytes], on_progress=None) -> list[bytes]:
-    """Upscale all images in parallel via fal.ai."""
+    """Upscale all images via fal.ai, 4 at a time to limit memory."""
     results: list[bytes] = []
-    tasks = [upscale_image_fal(img) for img in images]
     completed = 0
+    sem = asyncio.Semaphore(4)
+
+    async def upscale_one(img):
+        async with sem:
+            return await upscale_image_fal(img)
+
+    tasks = [upscale_one(img) for img in images]
 
     for coro in asyncio.as_completed(tasks):
         try:
