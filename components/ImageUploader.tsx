@@ -47,6 +47,37 @@ export function ImageUploader({ onUpload, disabled, hasExistingSphere }: Props) 
 
   return (
     <div className="space-y-3">
+      {/* Composite / New Sphere toggle — always visible when there's an existing sphere */}
+      {hasExistingSphere && (
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setComposite(true)}
+            className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
+              composite
+                ? "border-blue-500/40 bg-blue-500/15 text-blue-300"
+                : "border-white/10 text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Composite
+          </button>
+          <button
+            onClick={() => setComposite(false)}
+            className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
+              !composite
+                ? "border-blue-500/40 bg-blue-500/15 text-blue-300"
+                : "border-white/10 text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            New Sphere
+          </button>
+          <span className="text-[10px] text-muted-foreground/60">
+            {composite
+              ? "Layer your images onto the current environment"
+              : "Generate a fresh sphere from your images"}
+          </span>
+        </div>
+      )}
+
       {/* Drop zone */}
       <div
         onDragOver={(e) => {
@@ -87,14 +118,16 @@ export function ImageUploader({ onUpload, disabled, hasExistingSphere }: Props) 
           />
         </svg>
         <p className="text-sm text-muted-foreground">
-          Drop images here or click to browse
+          {hasExistingSphere && composite
+            ? "Drop images to composite onto this sphere"
+            : "Drop images here or click to browse"}
         </p>
         <p className="text-xs text-muted-foreground/60 mt-1">
           For best results, use 4K+ resolution images
         </p>
       </div>
 
-      {/* Previews + controls */}
+      {/* Previews */}
       {previews.length > 0 && (
         <div className="space-y-3">
           <div className="flex flex-wrap gap-2">
@@ -117,37 +150,6 @@ export function ImageUploader({ onUpload, disabled, hasExistingSphere }: Props) 
               </div>
             ))}
           </div>
-
-          {/* Composite / New Sphere toggle */}
-          {hasExistingSphere && (
-            <div className="flex items-center gap-3 px-1">
-              <button
-                onClick={() => setComposite(true)}
-                className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
-                  composite
-                    ? "border-blue-500/40 bg-blue-500/15 text-blue-300"
-                    : "border-white/10 text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Composite
-              </button>
-              <button
-                onClick={() => setComposite(false)}
-                className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
-                  !composite
-                    ? "border-blue-500/40 bg-blue-500/15 text-blue-300"
-                    : "border-white/10 text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                New Sphere
-              </button>
-              <span className="text-[10px] text-muted-foreground/60">
-                {composite
-                  ? "Layer images onto the current environment"
-                  : "Generate a fresh sphere from these images"}
-              </span>
-            </div>
-          )}
 
           <button
             onClick={handleGenerate}
