@@ -422,7 +422,7 @@ export default function HomePage() {
             <Textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder='Describe your campaign — mention @brand or paste a social profile URL for style inspiration...'
+              placeholder='Describe your bio — mention @handle or paste a social profile URL for style inspiration...'
               className="min-h-[120px] bg-white/5 border-white/10 text-foreground placeholder:text-muted-foreground resize-none text-base"
               disabled={generating}
             />
