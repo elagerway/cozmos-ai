@@ -32,12 +32,14 @@ async def generate_skybox(prompt: str, style_id: int = None, on_progress=None) -
     Generates at 8K, then exports at native 16K (16384x8192).
     Returns the 16K equirectangular image bytes.
     """
+    # Default to M3 Photoreal (Featured) — best photorealistic quality, no branding artifacts
+    DEFAULT_STYLE_ID = 119
+
     payload = {
         "prompt": prompt,
+        "skybox_style_id": style_id or DEFAULT_STYLE_ID,
         "enhance_prompt": True,
     }
-    if style_id:
-        payload["skybox_style_id"] = style_id
 
     async with httpx.AsyncClient(timeout=180.0) as client:
         # Step 1: Generate 8K skybox
