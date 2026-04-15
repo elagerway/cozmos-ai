@@ -440,8 +440,6 @@ export default function HomePage() {
             <div className="flex flex-wrap gap-2">
               {[
                 { stem: "env-bell-tower", label: "Bell Tower" },
-                { stem: "env-docklands", label: "Docklands" },
-                { stem: "env-rogland-night", label: "Clear Night Sky" },
                 { stem: "env-monkstown-castle", label: "Castle" },
                 { stem: "env-red-wall", label: "Red Wall" },
                 { stem: "env-peppermint-powerplant", label: "Powerplant" },
