@@ -1,12 +1,13 @@
 "use client"
 
 import { use, useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { SphereViewer } from "@/components/SphereViewer"
 import { SphereSpecViewer } from "@/components/SphereSpecViewer"
 import { ImageUploader } from "@/components/ImageUploader"
 import { getGeneration } from "@/lib/dummy-data"
-import { supabase, GenerationRow } from "@/lib/supabase"
+import { supabase, deleteGeneration, GenerationRow } from "@/lib/supabase"
 import { startUploadGeneration, pollStatus } from "@/lib/pipeline-client"
 import { GenerationProgress } from "@/components/GenerationProgress"
 import { PipelineStep } from "@/lib/types"
@@ -35,6 +36,18 @@ export default function PublicSharePage({
   const [step, setStep] = useState<PipelineStep>("scan_profile")
   const [pct, setPct] = useState(0)
   const [genLabel, setGenLabel] = useState("")
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const router = useRouter()
+
+  // Track fullscreen changes
+  useEffect(() => {
+    function onFullscreenChange() {
+      setIsFullscreen(!!document.fullscreenElement)
+    }
+    document.addEventListener("fullscreenchange", onFullscreenChange)
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange)
+  }, [])
 
   useEffect(() => {
     // Check hardcoded examples first
@@ -150,11 +163,25 @@ export default function PublicSharePage({
         ) : (
           <>
             {viewData.image_url && (
-              <SphereViewer
-                imageUrl={viewData.image_url}
-                tileStem={viewData.tile_stem}
-                tileBaseUrl={viewData.tile_base_url}
-              />
+              <div className="relative group">
+                <SphereViewer
+                  imageUrl={viewData.image_url}
+                  tileStem={viewData.tile_stem}
+                  tileBaseUrl={viewData.tile_base_url}
+                />
+                {/* Delete button — invisible until hover, hidden in fullscreen */}
+                {!isFullscreen && (
+                  <button
+                    onClick={() => setShowDeleteModal(true)}
+                    className="absolute top-3 right-3 z-20 w-8 h-8 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 hover:bg-red-500/80 text-white/60 hover:text-white backdrop-blur-sm"
+                    title="Delete sphere"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                )}
+              </div>
             )}
 
             <div className="mt-6">
@@ -240,6 +267,36 @@ export default function PublicSharePage({
           </p>
         </div>
       </footer>
+
+      {/* Delete modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-[#1a1a1a] border border-white/10 rounded-xl p-6 max-w-sm w-full mx-4 space-y-4">
+            <h3 className="text-lg font-semibold text-foreground">Delete this sphere?</h3>
+            <p className="text-sm text-muted-foreground">
+              This will permanently delete the sphere and all its tiles. This action cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="px-4 py-2 text-sm rounded-lg border border-white/10 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  await deleteGeneration(id)
+                  setShowDeleteModal(false)
+                  router.push("/examples")
+                }}
+                className="px-4 py-2 text-sm rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
