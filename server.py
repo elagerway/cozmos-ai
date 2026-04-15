@@ -255,46 +255,11 @@ async def upscale_all_parallel(images: list[bytes], on_progress=None) -> list[by
     return results
 
 
-def equirect_warp(img: pyvips.Image, y_on_canvas: int, canvas_h: int) -> pyvips.Image:
-    """Pre-warp an image to compensate for equirectangular pole stretching.
-
-    Uses pyvips coordinate math (no Python loops) for speed.
-    Each row is horizontally compressed by cos(latitude) so images
-    appear undistorted when projected onto the sphere.
-    """
-    import math
-
-    w = img.width
-    h = img.height
-    center_x = w / 2.0
-
-    # Build X coordinate grid: 0..w-1 across, repeated h rows
-    # pyvips.Image.xyz() gives (x, y) coordinate image
-    xy = pyvips.Image.xyz(w, h)
-    x_coords = xy.extract_band(0)  # x values: 0..w-1
-    y_coords = xy.extract_band(1)  # y values: 0..h-1
-
-    # Compute latitude for each row: lat = pi * (0.5 - (y_on_canvas + y) / canvas_h)
-    lat = ((y_coords + y_on_canvas) / canvas_h * -1 + 0.5) * math.pi
-
-    # cos(latitude), clamped to avoid extreme compression at poles
-    cos_lat = lat.cos()
-    cos_lat = (cos_lat > 0.15).ifthenelse(cos_lat, 0.15)
-
-    # Source x = center + (x - center) / cos_lat
-    mapx = (x_coords - center_x) / cos_lat + center_x
-
-    # mapy is just the y coordinate (no vertical warping)
-    mapim = mapx.bandjoin(y_coords.cast("float"))
-
-    return img.mapim(mapim)
-
-
 def compose_panorama(images: list[bytes], bg_color: list[int]) -> pyvips.Image:
     """Compose upscaled images into a 16K equirectangular panorama.
 
-    Images are pre-warped to compensate for equirectangular projection
-    distortion, so they appear undistorted on the sphere.
+    Images are placed in the equatorial band (middle 70% of canvas height)
+    to avoid pole distortion. Poles are filled with the background color.
     """
     PAD = 80
     canvas = pyvips.Image.black(CANVAS_W, CANVAS_H, bands=3) + bg_color
@@ -309,11 +274,17 @@ def compose_panorama(images: list[bytes], bg_color: list[int]) -> pyvips.Image:
             img = img[:3]
         return img
 
+    # Keep images in the equatorial band: 15%-85% of canvas height
+    # This avoids the pole regions where equirectangular stretching is worst
+    BAND_TOP = int(CANVAS_H * 0.15)     # ~1229px from top
+    BAND_BOT = int(CANVAS_H * 0.85)     # ~6963px from top
+    BAND_H = BAND_BOT - BAND_TOP        # ~5734px usable height
+
     heroes = images[:3] if n >= 3 else images
     products = images[3:] if n > 3 else []
 
-    # Top row: heroes
-    top_h = CANVAS_H // 2 - PAD
+    # Top row: heroes (upper half of the band)
+    top_h = BAND_H // 2 - PAD
     top_cell_w = (CANVAS_W - PAD * (len(heroes) + 1)) // max(len(heroes), 1)
 
     for i, img_bytes in enumerate(heroes):
@@ -321,14 +292,13 @@ def compose_panorama(images: list[bytes], bg_color: list[int]) -> pyvips.Image:
         scale = min(top_cell_w / img.width, top_h / img.height)
         resized = img.resize(scale, kernel=pyvips.enums.Kernel.LANCZOS3)
         x = PAD + i * (top_cell_w + PAD) + (top_cell_w - resized.width) // 2
-        y = PAD + (top_h - resized.height) // 2
-        warped = equirect_warp(resized, y, CANVAS_H)
-        canvas = canvas.insert(warped, x, y)
+        y = BAND_TOP + PAD + (top_h - resized.height) // 2
+        canvas = canvas.insert(resized, x, y)
 
-    # Bottom: products
+    # Bottom: products (lower half of the band)
     if products:
-        bot_start = CANVAS_H // 2 + PAD // 2
-        bot_h_total = CANVAS_H - bot_start - PAD
+        bot_start = BAND_TOP + BAND_H // 2 + PAD // 2
+        bot_h_total = BAND_BOT - bot_start - PAD
         cols = min(len(products), 5)
         rows = (len(products) + cols - 1) // cols
         row_h = (bot_h_total - PAD * (rows - 1)) // max(rows, 1)
@@ -342,8 +312,7 @@ def compose_panorama(images: list[bytes], bg_color: list[int]) -> pyvips.Image:
             resized = img.resize(scale, kernel=pyvips.enums.Kernel.LANCZOS3)
             x = PAD + c * (cell_w + PAD) + (cell_w - resized.width) // 2
             y = bot_start + r * (row_h + PAD) + (row_h - resized.height) // 2
-            warped = equirect_warp(resized, y, CANVAS_H)
-            canvas = canvas.insert(warped, x, y)
+            canvas = canvas.insert(resized, x, y)
 
     return canvas
 
