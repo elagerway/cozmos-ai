@@ -33,12 +33,10 @@ export default function ExamplesPage() {
         tile_stem: r.tile_stem,
         tile_base_url: r.tile_base_url,
       }))
-      // Show only Supabase generations if available, otherwise hardcoded
-      if (generated.length > 0) {
-        setAllExamples(generated)
-      } else {
-        setAllExamples(EXAMPLES)
-      }
+      // Merge: Supabase generations + hardcoded examples (dedup by id)
+      const seen = new Set(generated.map((g) => g.id))
+      const merged = [...generated, ...EXAMPLES.filter((e) => !seen.has(e.id))]
+      setAllExamples(merged)
     })
   }, [])
 
