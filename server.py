@@ -392,6 +392,90 @@ async def upscale_all_parallel(images: list[bytes], on_progress=None) -> list[by
     return results
 
 
+def compose_on_environment(images: list[bytes], environment: pyvips.Image) -> pyvips.Image:
+    """Composite upscaled images onto a Blockade-generated environment.
+
+    Images are placed in the equatorial band with subtle shadow/border
+    effects so they blend naturally with the AI environment.
+    """
+    PAD = 100
+    canvas = environment
+
+    n = len(images)
+    if n == 0:
+        return canvas
+
+    def load_img(data: bytes) -> pyvips.Image:
+        img = pyvips.Image.new_from_buffer(data, "")
+        if img.bands == 4:
+            img = img[:3]
+        return img
+
+    # Place images in the equatorial band: 25%-75% of canvas height
+    # Narrower band than solid-color version since the environment is visible
+    BAND_TOP = int(CANVAS_H * 0.25)
+    BAND_BOT = int(CANVAS_H * 0.75)
+    BAND_H = BAND_BOT - BAND_TOP
+
+    heroes = images[:3] if n >= 3 else images
+    products = images[3:] if n > 3 else []
+
+    def add_image_with_frame(canvas, img_bytes, x, y, max_w, max_h):
+        """Add an image with a subtle dark frame for contrast against the environment."""
+        img = load_img(img_bytes)
+        scale = min(max_w / img.width, max_h / img.height)
+        resized = img.resize(scale, kernel=pyvips.enums.Kernel.LANCZOS3)
+
+        # Create a dark semi-transparent backing slightly larger than the image
+        frame_pad = 6
+        frame_w = resized.width + frame_pad * 2
+        frame_h = resized.height + frame_pad * 2
+
+        # Dark frame background
+        frame = pyvips.Image.black(frame_w, frame_h, bands=3) + [20, 20, 20]
+
+        # Place frame, then image on top
+        fx = max(0, x - frame_pad)
+        fy = max(0, y - frame_pad)
+        if fx + frame_w <= canvas.width and fy + frame_h <= canvas.height:
+            canvas = canvas.insert(frame, fx, fy)
+        canvas = canvas.insert(resized, x, y)
+        return canvas
+
+    # Top row: heroes
+    top_h = BAND_H // 2 - PAD
+    top_cell_w = (CANVAS_W - PAD * (len(heroes) + 1)) // max(len(heroes), 1)
+
+    for i, img_bytes in enumerate(heroes):
+        img = load_img(img_bytes)
+        scale = min(top_cell_w / img.width, top_h / img.height)
+        resized = img.resize(scale, kernel=pyvips.enums.Kernel.LANCZOS3)
+        x = PAD + i * (top_cell_w + PAD) + (top_cell_w - resized.width) // 2
+        y = BAND_TOP + PAD + (top_h - resized.height) // 2
+        canvas = add_image_with_frame(canvas, img_bytes, x, y, top_cell_w, top_h)
+
+    # Bottom: products
+    if products:
+        bot_start = BAND_TOP + BAND_H // 2 + PAD // 2
+        bot_h_total = BAND_BOT - bot_start - PAD
+        cols = min(len(products), 5)
+        rows = (len(products) + cols - 1) // cols
+        row_h = (bot_h_total - PAD * (rows - 1)) // max(rows, 1)
+        cell_w = (CANVAS_W - PAD * (cols + 1)) // cols
+
+        for idx, img_bytes in enumerate(products):
+            r = idx // cols
+            c = idx % cols
+            img = load_img(img_bytes)
+            scale = min(cell_w / img.width, row_h / img.height)
+            resized = img.resize(scale, kernel=pyvips.enums.Kernel.LANCZOS3)
+            x = PAD + c * (cell_w + PAD) + (cell_w - resized.width) // 2
+            y = bot_start + r * (row_h + PAD) + (row_h - resized.height) // 2
+            canvas = add_image_with_frame(canvas, img_bytes, x, y, cell_w, row_h)
+
+    return canvas
+
+
 def compose_panorama(images: list[bytes], bg_color: list[int]) -> pyvips.Image:
     """Compose upscaled images into a 16K equirectangular panorama.
 
@@ -585,23 +669,67 @@ def run_pipeline(gen_id: str, brand: str, source_url: str = ""):
             generations[gen_id]["low_res_warning"] = True
             print(f"  Warning: max source image dimension is {max_dim}px (low res)")
 
-        # Step 2: Upscale via fal.ai (parallel)
-        def on_upscale_progress(done, total):
-            pct = 10 + int(55 * (done / total))
-            update("upscale", pct, f"Enhancing image {done}/{total}...")
+        # Step 2: Analyze style + generate environment (if Blockade available)
+        use_blockade = bool(BLOCKADE_API_KEY)
 
-        update("upscale", 12, f"Enhancing {len(raw_images)} images (GPU)...")
-        upscaled = loop.run_until_complete(
-            upscale_all_parallel(raw_images, on_progress=on_upscale_progress)
-        )
+        if use_blockade:
+            from style_analyzer import build_blockade_prompt
+            from sphere_gen import generate_sphere_from_prompt
+
+            update("upscale", 12, "Analyzing brand style...")
+            blockade_prompt = build_blockade_prompt(brand or "brand", raw_images, source_url)
+            update("upscale", 15, "Generating branded 360° environment...")
+
+            def on_env_progress(status):
+                if status == "pending":
+                    update("upscale", 18, "Queued for environment generation...")
+                elif status == "dispatched":
+                    update("upscale", 25, "AI rendering branded environment...")
+                elif status == "processing":
+                    update("upscale", 35, "Rendering 360° panorama...")
+                elif status == "exporting_16k":
+                    update("upscale", 50, "Exporting 16K environment...")
+                elif status.startswith("export_"):
+                    update("upscale", 55, "Processing 16K export...")
+
+            environment = loop.run_until_complete(
+                generate_sphere_from_prompt(blockade_prompt, on_progress=on_env_progress)
+            )
+            update("upscale", 58, "16K environment ready")
+
+            # Upscale the scraped images
+            def on_upscale_progress(done, total):
+                pct = 58 + int(7 * (done / total))
+                update("upscale", pct, f"Enhancing image {done}/{total}...")
+
+            update("upscale", 58, f"Enhancing {len(raw_images)} images...")
+            upscaled = loop.run_until_complete(
+                upscale_all_parallel(raw_images, on_progress=on_upscale_progress)
+            )
+            update("upscale", 65, f"Enhanced {len(upscaled)} images")
+
+            # Composite images onto the AI environment
+            update("compose", 68, "Compositing images onto environment...")
+            canvas = compose_on_environment(upscaled, environment)
+            update("compose", 80, "Branded sphere composed")
+        else:
+            # Fallback: original dark background compose
+            def on_upscale_progress(done, total):
+                pct = 10 + int(55 * (done / total))
+                update("upscale", pct, f"Enhancing image {done}/{total}...")
+
+            update("upscale", 12, f"Enhancing {len(raw_images)} images (GPU)...")
+            upscaled = loop.run_until_complete(
+                upscale_all_parallel(raw_images, on_progress=on_upscale_progress)
+            )
+            update("upscale", 65, f"Enhanced {len(upscaled)} images")
+
+            update("compose", 70, "Composing sphere panorama...")
+            bg_color = [17, 17, 17]
+            canvas = compose_panorama(upscaled, bg_color)
+            update("compose", 80, "Panorama composed")
+
         loop.close()
-        update("upscale", 65, f"Enhanced {len(upscaled)} images")
-
-        # Step 3: Compose
-        update("compose", 70, "Composing sphere panorama...")
-        bg_color = [17, 17, 17]
-        canvas = compose_panorama(upscaled, bg_color)
-        update("compose", 80, "Panorama composed")
 
         # Step 4: Tiles
         def on_tile_progress(done, total):
