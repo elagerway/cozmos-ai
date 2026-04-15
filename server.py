@@ -341,7 +341,7 @@ def save_generation_record(gen_id: str, data: dict):
         print(f"  DB save failed: {resp.status_code} {resp.text[:200]}")
 
 
-def generate_tiles(canvas: pyvips.Image, sphere_id: str, upload: bool = True) -> str:
+def generate_tiles(canvas: pyvips.Image, sphere_id: str, upload: bool = True, on_progress=None) -> str:
     """Generate tile pyramid and optionally upload to Supabase Storage."""
     sphere_tiles_dir = TILES_DIR / sphere_id
     if sphere_tiles_dir.exists():
@@ -360,6 +360,8 @@ def generate_tiles(canvas: pyvips.Image, sphere_id: str, upload: bool = True) ->
         upload_to_supabase(f"tiles/{sphere_id}/base.jpg", buf)
 
     # Tile levels
+    total_tiles = sum(l["cols"] * l["rows"] for l in LEVELS)
+    tiles_done = 0
     for li, level in enumerate(LEVELS):
         level_dir = sphere_tiles_dir / str(li)
         level_dir.mkdir(exist_ok=True)
@@ -376,6 +378,9 @@ def generate_tiles(canvas: pyvips.Image, sphere_id: str, upload: bool = True) ->
                 (level_dir / f"{c}_{r}.jpg").write_bytes(buf)
                 if upload:
                     upload_to_supabase(f"tiles/{sphere_id}/{li}/{c}_{r}.jpg", buf)
+                tiles_done += 1
+                if on_progress and tiles_done % 10 == 0:
+                    on_progress(tiles_done, total_tiles)
 
     # 8K JPEG (within JPEG limits)
     img_8k = canvas.resize(8192 / canvas.width, kernel=pyvips.enums.Kernel.LANCZOS3, vscale=4096 / canvas.height)
@@ -430,8 +435,12 @@ def run_pipeline(gen_id: str, brand: str, source_url: str = ""):
         update("compose", 80, "Panorama composed")
 
         # Step 4: Tiles
+        def on_tile_progress(done, total):
+            pct = 82 + int(13 * (done / total))
+            update("tiles", pct, f"Generating tiles ({done}/{total})...")
+
         update("tiles", 82, "Generating tile pyramid...")
-        generate_tiles(canvas, gen_id)
+        generate_tiles(canvas, gen_id, on_progress=on_tile_progress)
         update("tiles", 95, "Tiles generated")
 
         # Step 5: Save to Supabase
