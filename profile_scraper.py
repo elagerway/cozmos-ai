@@ -8,8 +8,23 @@ import re
 from dataclasses import dataclass, field
 from io import BytesIO
 
+import os
+
 import httpx
 from PIL import Image
+
+INSTAGRAM_USERNAME = os.environ.get("INSTAGRAM_USERNAME", "")
+INSTAGRAM_PASSWORD = os.environ.get("INSTAGRAM_PASSWORD", "")
+
+
+@dataclass
+class InstagramData:
+    handle: str = ""
+    name: str = ""
+    bio: str = ""
+    profile_pic_url: str = ""
+    follower_count: int = 0
+    post_images: list[str] = field(default_factory=list)  # URLs
 
 
 @dataclass
@@ -54,6 +69,7 @@ class InfluencerProfile:
     mood: str = ""
     youtube: YouTubeData | None = None
     twitter: TwitterData | None = None
+    instagram: InstagramData | None = None
     website_url: str = ""
     thumbnail_images: list[bytes] = field(default_factory=list)
 
@@ -278,6 +294,61 @@ async def scrape_twitter_profile(handle: str) -> TwitterData | None:
     return None
 
 
+async def scrape_instagram_profile(handle: str) -> InstagramData | None:
+    """Scrape Instagram profile and recent post images via instagrapi."""
+    if not INSTAGRAM_USERNAME or not INSTAGRAM_PASSWORD:
+        print(f"  Instagram: skipping (no credentials)")
+        return None
+
+    try:
+        from instagrapi import Client
+
+        cl = Client()
+        # Use cached session if available
+        session_path = "/tmp/ig_session.json"
+        try:
+            cl.load_settings(session_path)
+            cl.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+            cl.get_timeline_feed()  # Verify session is valid
+        except Exception:
+            cl.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+            cl.dump_settings(session_path)
+
+        # Look up user
+        try:
+            user_id = cl.user_id_from_username(handle)
+        except Exception:
+            print(f"  Instagram: user '{handle}' not found")
+            return None
+
+        user_info = cl.user_info(user_id)
+
+        data = InstagramData(
+            handle=handle,
+            name=user_info.full_name or handle,
+            bio=user_info.biography or "",
+            profile_pic_url=str(user_info.profile_pic_url_hd or user_info.profile_pic_url or ""),
+            follower_count=user_info.follower_count or 0,
+        )
+
+        # Get recent posts
+        medias = cl.user_medias(user_id, amount=12)
+        for media in medias:
+            if media.media_type == 1 and media.thumbnail_url:  # Photo
+                data.post_images.append(str(media.thumbnail_url))
+            elif media.media_type == 8 and media.resources:  # Carousel
+                for resource in media.resources[:2]:
+                    if resource.thumbnail_url:
+                        data.post_images.append(str(resource.thumbnail_url))
+
+        print(f"  Instagram: {data.name} (@{handle}), {data.follower_count} followers, {len(data.post_images)} images")
+        return data
+
+    except Exception as e:
+        print(f"  Instagram scrape failed: {e}")
+        return None
+
+
 async def download_thumbnails(videos: list[VideoData], max_count: int = 12) -> list[bytes]:
     """Download video thumbnails as image bytes."""
     images = []
@@ -334,6 +405,19 @@ async def scrape_influencer_profile(name: str) -> InfluencerProfile:
                 profile.profile_image_url = yt.profile_pic_url
                 profile.banner_image_url = yt.banner_url
 
+    # Try Instagram
+    for handle in handles:
+        ig = await scrape_instagram_profile(handle)
+        if ig and (ig.bio or ig.post_images):
+            profile.instagram = ig
+            if not profile.bio and ig.bio:
+                profile.bio = ig.bio
+            if not profile.name and ig.name:
+                profile.name = ig.name
+            if not profile.profile_image_url and ig.profile_pic_url:
+                profile.profile_image_url = ig.profile_pic_url
+            break
+
     # Try Twitter
     for handle in handles:
         tw = await scrape_twitter_profile(handle)
@@ -347,10 +431,22 @@ async def scrape_influencer_profile(name: str) -> InfluencerProfile:
                 profile.profile_image_url = tw.profile_pic_url
             break
 
-    # Download thumbnails for compositing
+    # Download thumbnails for compositing (YouTube + Instagram)
     if profile.youtube and profile.youtube.videos:
         profile.thumbnail_images = await download_thumbnails(profile.youtube.videos)
-        print(f"  Downloaded {len(profile.thumbnail_images)} thumbnails")
+        print(f"  Downloaded {len(profile.thumbnail_images)} YouTube thumbnails")
+
+    # Also download Instagram post images
+    if profile.instagram and profile.instagram.post_images:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            for img_url in profile.instagram.post_images[:6]:
+                try:
+                    resp = await client.get(img_url)
+                    if resp.status_code == 200 and len(resp.content) > 5000:
+                        profile.thumbnail_images.append(resp.content)
+                except Exception:
+                    continue
+        print(f"  Downloaded {len(profile.instagram.post_images[:6])} Instagram images")
 
     # Extract colors from thumbnails
     if profile.thumbnail_images:
@@ -433,6 +529,8 @@ def build_markers(profile: InfluencerProfile) -> list[dict]:
             "profile_image": profile.profile_image_url,
             "subscriber_count": profile.youtube.subscriber_count if profile.youtube else "",
             "twitter_handle": profile.twitter.handle if profile.twitter else "",
+            "instagram_handle": profile.instagram.handle if profile.instagram else "",
+            "instagram_followers": profile.instagram.follower_count if profile.instagram else 0,
             "channel_url": profile.youtube.channel_url if profile.youtube else "",
         },
     })

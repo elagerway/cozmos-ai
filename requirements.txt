@@ -8,3 +8,4 @@ fal-client
 requests
 python-dotenv
 playwright
+instagrapi
