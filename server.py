@@ -69,33 +69,109 @@ generations: dict[str, dict] = {}
 executor = ThreadPoolExecutor(max_workers=2)
 
 
-async def screenshot_website(url: str) -> list[bytes]:
-    """Capture screenshots of a website at different scroll positions."""
-    from urllib.parse import quote_plus
-    images = []
-    # Use free screenshot API to capture different viewport sections
-    api_base = "https://api.screenshotone.com/take"
-    # Free tier: use simple approach with different viewports
-    # Fall back to a simpler API
-    widths = [1280]
-    scroll_positions = [0, 800, 1600, 2400, 3200, 4000, 4800, 5600, 6400, 7200, 8000, 8800]
+async def crawl_internal_links(url: str) -> list[str]:
+    """Find internal page links on a site to scrape more content."""
+    from bs4 import BeautifulSoup
+    from urllib.parse import urljoin, urlparse
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        for scroll_y in scroll_positions:
-            try:
-                # Use thum.io free screenshot API
-                screenshot_url = f"https://image.thum.io/get/width/1280/crop/800/viewportWidth/1280/png/{url}"
-                if scroll_y > 0:
-                    screenshot_url = f"https://image.thum.io/get/width/1280/crop/800/viewportWidth/1280/scrollTo/{scroll_y}/png/{url}"
-                resp = await client.get(screenshot_url)
-                if resp.status_code == 200 and len(resp.content) > 10000:
-                    images.append(resp.content)
-                    print(f"  Screenshot at scroll={scroll_y}: {len(resp.content)} bytes")
+    base_domain = urlparse(url).netloc
+    pages = [url]
+
+    try:
+        async with httpx.AsyncClient(
+            follow_redirects=True, timeout=10.0,
+            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
+        ) as client:
+            resp = await client.get(url)
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            for a in soup.find_all("a", href=True):
+                href = a["href"]
+                if href.startswith("/") and not href.startswith("//"):
+                    href = urljoin(url, href)
+                parsed = urlparse(href)
+                if parsed.netloc == base_domain and href not in pages:
+                    # Skip anchors, assets, auth pages
+                    if any(x in href for x in ["#", ".pdf", ".zip", "login", "signup", "auth"]):
+                        continue
+                    pages.append(href)
+                    if len(pages) >= 8:
+                        break
+    except Exception as e:
+        print(f"  Crawl failed: {e}")
+
+    return pages
+
+
+async def screenshot_pages(urls: list[str]) -> list[bytes]:
+    """Take screenshots of multiple pages using headless Chromium via Playwright.
+
+    For each page: dismiss cookie banners, scroll through the page,
+    and capture screenshots at different scroll positions.
+    """
+    from playwright.async_api import async_playwright
+
+    images = []
+
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context(
+                viewport={"width": 1280, "height": 800},
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+            )
+
+            for page_url in urls:
                 if len(images) >= 12:
                     break
-            except Exception as e:
-                print(f"  Screenshot failed at scroll={scroll_y}: {e}")
-                continue
+                try:
+                    page = await context.new_page()
+                    await page.goto(page_url, wait_until="networkidle", timeout=15000)
+
+                    # Dismiss cookie/consent banners
+                    for selector in [
+                        "button:has-text('Accept')",
+                        "button:has-text('Accept All')",
+                        "button:has-text('Got it')",
+                        "button:has-text('OK')",
+                        "button:has-text('Agree')",
+                        "[class*='cookie'] button",
+                        "[class*='consent'] button",
+                        "[id*='cookie'] button",
+                    ]:
+                        try:
+                            btn = page.locator(selector).first
+                            if await btn.is_visible(timeout=500):
+                                await btn.click()
+                                await page.wait_for_timeout(300)
+                                break
+                        except Exception:
+                            continue
+
+                    # Get total page height
+                    total_height = await page.evaluate("document.body.scrollHeight")
+                    viewport_h = 800
+
+                    # Screenshot at different scroll positions
+                    positions = list(range(0, min(total_height, 8000), viewport_h))
+                    for scroll_y in positions:
+                        if len(images) >= 12:
+                            break
+                        await page.evaluate(f"window.scrollTo(0, {scroll_y})")
+                        await page.wait_for_timeout(300)
+                        screenshot = await page.screenshot(type="png")
+                        if len(screenshot) > 5000:
+                            images.append(screenshot)
+                            print(f"  Screenshot: {page_url[:50]} scroll={scroll_y} ({len(screenshot)} bytes)")
+
+                    await page.close()
+                except Exception as e:
+                    print(f"  Screenshot failed for {page_url[:50]}: {e}")
+                    continue
+
+            await browser.close()
+    except Exception as e:
+        print(f"  Playwright error: {e}")
 
     return images
 
@@ -197,10 +273,13 @@ async def scrape_images_from_url(url: str) -> list[bytes]:
             except Exception:
                 continue
 
-    # Fallback: if no images found, take screenshots of the website
-    if not images:
-        print(f"  No images found via scraping, falling back to screenshots...")
-        images = await screenshot_website(url)
+    # Fallback: if not enough images, crawl internal pages and screenshot them
+    if len(images) < 6:
+        print(f"  Only {len(images)} images found, crawling site pages for screenshots...")
+        pages = await crawl_internal_links(url)
+        print(f"  Found {len(pages)} pages to screenshot")
+        screenshots = await screenshot_pages(pages)
+        images.extend(screenshots)
 
     return images
 
