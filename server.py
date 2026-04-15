@@ -177,6 +177,65 @@ async def screenshot_pages(urls: list[str]) -> list[bytes]:
     return images
 
 
+async def scrape_youtube_thumbnails(handle: str) -> list[bytes]:
+    """Scrape high-res video thumbnails from a YouTube channel.
+
+    YouTube thumbnails are always available at 1920x1080 (maxresdefault)
+    or 1280x720 (hqdefault). This is the best source for influencer content.
+    """
+    import re
+
+    channel_urls = [
+        f"https://www.youtube.com/@{handle}/videos",
+        f"https://www.youtube.com/c/{handle}/videos",
+        f"https://www.youtube.com/{handle}/videos",
+    ]
+
+    video_ids = set()
+
+    async with httpx.AsyncClient(
+        follow_redirects=True, timeout=15.0,
+        headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
+    ) as client:
+        for channel_url in channel_urls:
+            try:
+                resp = await client.get(channel_url)
+                if resp.status_code != 200:
+                    continue
+                # Extract video IDs from the page
+                ids = re.findall(r'"videoId":"([a-zA-Z0-9_-]{11})"', resp.text)
+                video_ids.update(ids)
+                if video_ids:
+                    print(f"  Found {len(video_ids)} videos on {channel_url}")
+                    break
+            except Exception:
+                continue
+
+    if not video_ids:
+        return []
+
+    # Download maxresdefault thumbnails (1920x1080)
+    images = []
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for vid in list(video_ids)[:20]:
+            for quality in ["maxresdefault", "hqdefault"]:
+                try:
+                    url = f"https://img.youtube.com/vi/{vid}/{quality}.jpg"
+                    resp = await client.get(url)
+                    if resp.status_code == 200 and len(resp.content) > 5000:
+                        # Skip the default gray placeholder (very small file)
+                        if len(resp.content) > 10000:
+                            images.append(resp.content)
+                            print(f"  YouTube thumbnail: {vid} ({quality}, {len(resp.content)} bytes)")
+                            break
+                except Exception:
+                    continue
+            if len(images) >= 12:
+                break
+
+    return images
+
+
 async def scrape_images_from_url(url: str) -> list[bytes]:
     """Scrape images from any URL. Falls back to screenshots if no images found."""
     from bs4 import BeautifulSoup
@@ -340,11 +399,16 @@ async def scrape_brand_images(brand: str) -> list[bytes]:
                 if images:
                     return images
 
-    # Try social platforms
+    # Try YouTube thumbnails first — best source for influencers (always hi-res)
+    print(f"  Trying YouTube thumbnails for {brand}...")
+    images = await scrape_youtube_thumbnails(brand)
+    if images:
+        return images
+
+    # Try other social platforms
     social_urls = [
         f"https://www.instagram.com/{brand}/",
         f"https://x.com/{brand}",
-        f"https://www.youtube.com/@{brand}",
         f"https://www.tiktok.com/@{brand}",
         f"https://www.linkedin.com/in/{brand}/",
     ]
