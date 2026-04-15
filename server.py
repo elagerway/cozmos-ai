@@ -1122,10 +1122,15 @@ async def generate(body: dict):
     # Detect "about me" intent — route to about-me pipeline
     prompt_lower = prompt.lower()
     if any(phrase in prompt_lower for phrase in ["about me", "bio sphere", "influencer showcase", "creator showcase", "link in bio"]):
-        # Extract the name
-        extracted_brand, _ = extract_brand_from_prompt(prompt)
-        if extracted_brand or brand:
-            return await generate_about_me({"name": extracted_brand or brand, "prompt": prompt})
+        # Extract the person's name — look for "for [Name]" or "based on [Name]"
+        import re as re_mod
+        name_match = re_mod.search(
+            r'(?:for|about|of|based on|featuring)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)',
+            prompt
+        )
+        about_me_name = name_match.group(1).strip() if name_match else brand
+        if about_me_name:
+            return await generate_about_me({"name": about_me_name, "prompt": prompt})
 
     # If no explicit brand or URL, try to extract from the prompt
     if not brand and not source_url and prompt:
