@@ -466,13 +466,22 @@ export default function HomePage() {
 
           {/* Progress or Sphere */}
           {!done ? (
-            <div className="flex items-center justify-center min-h-[400px]">
+            <div className="flex flex-col items-center justify-center min-h-[400px] gap-6">
               <GenerationProgress
                 currentStep={step}
                 pct={pct}
                 label={label}
                 hasSocialProfile={!!detectedProfile}
               />
+              <button
+                onClick={() => {
+                  cleanupRef.current?.()
+                  handleReset()
+                }}
+                className="text-xs text-muted-foreground hover:text-red-400 transition-colors"
+              >
+                Cancel
+              </button>
             </div>
           ) : (
             <div className="space-y-6">
