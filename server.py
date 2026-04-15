@@ -726,14 +726,18 @@ async def generate_from_prompt(body: dict):
                 elif status == "dispatched":
                     update("scrape", 20, "AI rendering 360° panorama...")
                 elif status == "processing":
-                    update("upscale", 40, "Processing 8K panorama...")
+                    update("upscale", 40, "Rendering 8K panorama...")
+                elif status == "exporting_16k":
+                    update("upscale", 55, "Exporting native 16K resolution...")
+                elif status.startswith("export_"):
+                    update("compose", 60, "Processing 16K export...")
 
             loop = asyncio.new_event_loop()
             canvas = loop.run_until_complete(
                 generate_sphere_from_prompt(prompt, on_progress=on_skybox_progress)
             )
             loop.close()
-            update("compose", 70, "8K panorama generated, upscaling to 16K...")
+            update("compose", 70, "16K panorama ready")
 
             # Tiles
             def on_tile_progress(done, total):
