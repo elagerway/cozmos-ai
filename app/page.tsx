@@ -464,7 +464,7 @@ export default function HomePage() {
           {/* Pre-built high-res sample spheres */}
           <div className="pt-4 border-t border-white/5">
             <p className="text-xs text-muted-foreground mb-3">
-              Or explore a pre-built 16K sphere:
+              Or explore our hand selected briefs that output 16K spheres:
             </p>
             <div className="flex flex-wrap gap-2">
               {[
