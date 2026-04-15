@@ -400,10 +400,12 @@ export default function HomePage() {
                 { id: "sample-bell-tower", label: "Bell Tower" },
                 { id: "sample-venice-sunset", label: "Venice Sunset" },
                 { id: "sample-rogland-night", label: "Clear Night Sky" },
+                { id: "sample-monkstown-castle", label: "Castle" },
                 { id: "sample-red-wall", label: "Red Wall" },
                 { id: "sample-peppermint-powerplant", label: "Powerplant" },
                 { id: "sample-gym", label: "Gym" },
                 { id: "sample-outdoor-storm", label: "Storm Sky" },
+                { id: "sample-cozy-cafe", label: "Cozy Cafe" },
                 { id: "sample-luxury-ballroom", label: "Ballroom" },
               ].map((s) => (
                 <Link
