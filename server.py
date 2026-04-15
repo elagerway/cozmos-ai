@@ -571,6 +571,19 @@ def run_pipeline(gen_id: str, brand: str, source_url: str = ""):
             loop.close()
             return
 
+        # Check source image quality
+        max_dim = 0
+        for img_bytes in raw_images:
+            try:
+                img = Image.open(BytesIO(img_bytes))
+                max_dim = max(max_dim, img.width, img.height)
+            except Exception:
+                pass
+        low_res = max_dim < 2000
+        if low_res:
+            generations[gen_id]["low_res_warning"] = True
+            print(f"  Warning: max source image dimension is {max_dim}px (low res)")
+
         # Step 2: Upscale via fal.ai (parallel)
         def on_upscale_progress(done, total):
             pct = 10 + int(55 * (done / total))
@@ -668,6 +681,127 @@ async def generate(body: dict):
 
     executor.submit(run_pipeline, gen_id, brand, source_url)
     return {"id": gen_id}
+
+
+@app.post("/generate-from-uploads")
+async def generate_from_uploads(body: dict):
+    """Start sphere generation from base64-encoded uploaded images."""
+    prompt = body.get("prompt", "Upload sphere")
+    images_b64 = body.get("images", [])
+
+    if not images_b64:
+        return JSONResponse({"error": "No images provided"}, status_code=400)
+
+    gen_id = f"gen-upload-{uuid.uuid4().hex[:8]}"
+    generations[gen_id] = {
+        "id": gen_id,
+        "brand": "",
+        "prompt": prompt,
+        "status": "running",
+        "step": "init",
+        "pct": 0,
+        "label": "Starting...",
+    }
+
+    # Decode images
+    raw_images = []
+    for b64 in images_b64:
+        try:
+            # Strip data URI prefix if present
+            if "," in b64:
+                b64 = b64.split(",", 1)[1]
+            raw_images.append(base64.b64decode(b64))
+        except Exception:
+            continue
+
+    def run_upload_pipeline(gen_id, raw_images):
+        run_pipeline_with_images(gen_id, raw_images)
+
+    executor.submit(run_upload_pipeline, gen_id, raw_images)
+    return {"id": gen_id}
+
+
+def run_pipeline_with_images(gen_id: str, raw_images: list[bytes]):
+    """Run pipeline with pre-provided images (skip scraping)."""
+    start = time.time()
+
+    def update(step: str, pct: int, label: str):
+        generations[gen_id].update({"step": step, "pct": pct, "label": label})
+
+    try:
+        update("scrape", 10, f"Processing {len(raw_images)} uploaded images")
+
+        # Upscale
+        loop = asyncio.new_event_loop()
+        def on_upscale_progress(done, total):
+            pct = 10 + int(55 * (done / total))
+            update("upscale", pct, f"Enhancing image {done}/{total}...")
+
+        update("upscale", 12, f"Enhancing {len(raw_images)} images (GPU)...")
+        upscaled = loop.run_until_complete(
+            upscale_all_parallel(raw_images, on_progress=on_upscale_progress)
+        )
+        loop.close()
+        update("upscale", 65, f"Enhanced {len(upscaled)} images")
+
+        # Compose
+        update("compose", 70, "Composing sphere panorama...")
+        bg_color = [17, 17, 17]
+        canvas = compose_panorama(upscaled, bg_color)
+        update("compose", 80, "Panorama composed")
+
+        # Tiles
+        def on_tile_progress(done, total):
+            pct = 82 + int(13 * (done / total))
+            update("tiles", pct, f"Generating tiles ({done}/{total})...")
+
+        update("tiles", 82, "Generating tile pyramid...")
+        generate_tiles(canvas, gen_id, on_progress=on_tile_progress)
+        update("tiles", 95, "Tiles generated")
+
+        # Save
+        update("save", 96, "Saving to cloud...")
+        duration = int(time.time() - start)
+
+        if SUPABASE_URL:
+            tile_base_url = f"{SUPABASE_URL}/storage/v1/object/public/spheres"
+            image_url = f"{tile_base_url}/{gen_id}.jpg"
+        else:
+            tile_base_url = ""
+            image_url = f"/spheres/{gen_id}.jpg"
+
+        save_generation_record(gen_id, {
+            "brand": "",
+            "prompt": generations[gen_id].get("prompt", ""),
+            "status": "done",
+            "step": "done",
+            "step_label": "Your sphere is ready",
+            "image_url": image_url,
+            "tile_stem": gen_id,
+            "tile_base_url": tile_base_url,
+            "duration_s": duration,
+            "image_count": len(upscaled),
+            "cost_usd": round(len(upscaled) * 0.003, 4),
+        })
+
+        generations[gen_id].update({
+            "status": "done",
+            "step": "done",
+            "pct": 100,
+            "label": "Your sphere is ready",
+            "image_url": image_url,
+            "tile_stem": gen_id,
+            "tile_base_url": tile_base_url,
+            "duration_s": duration,
+            "image_count": len(upscaled),
+        })
+        print(f"Upload pipeline complete: {gen_id} in {duration}s")
+
+    except Exception as e:
+        print(f"Upload pipeline error: {e}")
+        import traceback
+        traceback.print_exc()
+        generations[gen_id].update({"status": "failed", "error": str(e)})
 
 
 @app.get("/status/{gen_id}")
