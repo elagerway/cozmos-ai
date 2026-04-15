@@ -177,7 +177,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
         setLoading(false)
 
         // Add markers
-        const markersPlugin = viewer.getPlugin(MarkersPlugin)
+        const markersPlugin = viewer.getPlugin(MarkersPlugin) as any
         if (!markersPlugin) return
 
         for (const marker of markers) {
@@ -190,9 +190,8 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
               position: { yaw: yawRad, pitch: pitchRad },
               html: ProfileCardHTML(marker.data as ProfileMarkerData),
               anchor: "center center",
-              zoomLvl: 100,
               data: marker.data,
-            })
+            } as any)
           } else if (marker.type === "video") {
             const vdata = marker.data as VideoMarkerData
             markersPlugin.addMarker({
@@ -200,15 +199,14 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
               position: { yaw: yawRad, pitch: pitchRad },
               html: VideoCardHTML(vdata),
               anchor: "center center",
-              zoomLvl: 100,
               data: vdata,
-            })
+            } as any)
           }
         }
 
         // Handle video clicks
         markersPlugin.addEventListener("select-marker", (e: any) => {
-          const data = e.marker?.data
+          const data = e.marker?.config?.data || e.marker?.data
           if (data?.video_id) {
             setActiveVideo(data.video_id)
           }

@@ -8,7 +8,7 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
-  title: "Cozmos — AI-Powered 360° Sphere Generation",
+  title: "Biosphere — AI-Powered 360° Sphere Generation",
   description:
     "Describe your campaign in plain English. Get a fully-rendered interactive 360° sphere in under 90 seconds.",
 }

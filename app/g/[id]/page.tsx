@@ -142,9 +142,9 @@ export default function PublicSharePage({
         <div className="max-w-5xl mx-auto flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <div className="w-6 h-6 rounded-md bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center">
-              <span className="text-white font-bold text-[10px]">C</span>
+              <span className="text-white font-bold text-[10px]">B</span>
             </div>
-            <span className="text-sm text-muted-foreground">Cozmos</span>
+            <span className="text-sm text-muted-foreground">Biosphere</span>
           </Link>
           <Link
             href="/"
@@ -283,9 +283,9 @@ export default function PublicSharePage({
           <p className="text-xs text-muted-foreground">
             Made with{" "}
             <Link href="/" className="text-blue-400 hover:underline">
-              Cozmos
+              Biosphere
             </Link>{" "}
-            — AI-Powered 360° Sphere Generation
+            — AI-Powered 360° Biosphere Generation
           </p>
         </div>
       </footer>

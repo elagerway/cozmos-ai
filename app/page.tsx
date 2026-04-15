@@ -382,10 +382,10 @@ export default function HomePage() {
             className="flex items-center gap-2"
           >
             <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center">
-              <span className="text-white font-bold text-sm">C</span>
+              <span className="text-white font-bold text-sm">B</span>
             </div>
             <span className="font-semibold text-foreground tracking-tight">
-              Cozmos
+              Biosphere
             </span>
           </button>
           <Link
@@ -401,19 +401,19 @@ export default function HomePage() {
       <section className="max-w-4xl mx-auto px-6 pt-20 pb-12 text-center">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-medium mb-8">
           <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-          AI-Powered Sphere Generation
+          AI-Powered Biosphere Generation
         </div>
         <h1 className="text-5xl sm:text-6xl font-bold tracking-tight leading-[1.1] mb-6">
           From brief to{" "}
           <span className="bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">
             interactive 360°
           </span>{" "}
-          sphere in seconds
+          biosphere in seconds
         </h1>
         <p className="text-lg text-muted-foreground max-w-2xl mx-auto mb-10 leading-relaxed">
-          Describe your campaign in plain English. Point to a social media
+          Describe your bio in plain English. Point to a social media
           profile for style inspiration. Our AI extracts the brand&apos;s visual
-          identity and generates a fully-interactive sphere.
+          identity and generates a fully-interactive biosphere.
         </p>
 
         {/* Generation form */}
@@ -637,8 +637,8 @@ export default function HomePage() {
       {/* Footer */}
       <footer className="border-t border-white/5 py-8">
         <div className="max-w-6xl mx-auto px-6 flex items-center justify-between text-xs text-muted-foreground">
-          <span>Cozmos &copy; 2026</span>
-          <span>AI-Powered Sphere Generation</span>
+          <span>Biosphere &copy; 2026</span>
+          <span>AI-Powered Biosphere Generation</span>
         </div>
       </footer>
     </div>
