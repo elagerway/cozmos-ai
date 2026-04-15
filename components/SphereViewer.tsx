@@ -25,6 +25,7 @@ export function SphereViewer({ imageUrl, tileStem, tileBaseUrl }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<any>(null)
   const [ready, setReady] = useState(false)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -36,6 +37,7 @@ export function SphereViewer({ imageUrl, tileStem, tileBaseUrl }: Props) {
     if (!ready || !containerRef.current) return
 
     let destroyed = false
+    setLoading(true)
 
     async function init() {
       if (destroyed || !containerRef.current) return
@@ -54,7 +56,7 @@ export function SphereViewer({ imageUrl, tileStem, tileBaseUrl }: Props) {
           ? `${tileBaseUrl}/tiles/${stem}`
           : `/spheres/tiles/${stem}`
 
-        viewerRef.current = new Viewer({
+        const viewer = new Viewer({
           container: containerRef.current,
           adapter: EquirectangularTilesAdapter,
           panorama: {
@@ -68,17 +70,27 @@ export function SphereViewer({ imageUrl, tileStem, tileBaseUrl }: Props) {
           touchmoveTwoFingers: false,
           navbar: ["zoom", "fullscreen"],
         })
+        viewerRef.current = viewer
+
+        viewer.addEventListener("ready", () => {
+          if (!destroyed) setLoading(false)
+        })
       } else {
         const { Viewer } = await import("@photo-sphere-viewer/core")
         if (destroyed || !containerRef.current) return
 
-        viewerRef.current = new Viewer({
+        const viewer = new Viewer({
           container: containerRef.current,
           panorama: imageUrl,
           defaultZoomLvl: 50,
           minFov: 15,
           touchmoveTwoFingers: false,
           navbar: ["zoom", "fullscreen"],
+        })
+        viewerRef.current = viewer
+
+        viewer.addEventListener("ready", () => {
+          if (!destroyed) setLoading(false)
         })
       }
     }
@@ -93,9 +105,16 @@ export function SphereViewer({ imageUrl, tileStem, tileBaseUrl }: Props) {
   }, [imageUrl, tileStem, tileBaseUrl, ready])
 
   return (
-    <div
-      ref={containerRef}
-      className="w-full h-[500px] rounded-xl overflow-hidden border border-white/10"
-    />
+    <div className="relative w-full h-[500px] rounded-xl overflow-hidden border border-white/10">
+      <div ref={containerRef} className="w-full h-full" />
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm z-10">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+            <span className="text-sm text-white/70">Rendering sphere...</span>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
