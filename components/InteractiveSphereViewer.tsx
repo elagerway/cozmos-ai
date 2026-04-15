@@ -243,8 +243,6 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
               position: { yaw: yawRad, pitch: pitchRad },
               html: ProfileCardHTML(marker.data as ProfileMarkerData),
               anchor: "center center",
-              size: { width: 400, height: 380 },
-              scale: [0.6, 1.3],
               data: { ...marker.data, markerType: "profile" },
             } as any)
           } else if (marker.type === "video") {
@@ -254,8 +252,6 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
               position: { yaw: yawRad, pitch: pitchRad },
               html: VideoThumbnailHTML(vdata),
               anchor: "center center",
-              size: { width: 640, height: 420 },
-              scale: [0.5, 1.5],
               data: { ...vdata, markerType: "video" },
             } as any)
           } else if (marker.type === "image") {
@@ -264,8 +260,6 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
               position: { yaw: yawRad, pitch: pitchRad },
               html: ImageFrameHTML(marker.data as any),
               anchor: "center center",
-              size: { width: 300, height: 420 },
-              scale: [0.5, 1.4],
             } as any)
           }
         }
