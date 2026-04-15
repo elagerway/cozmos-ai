@@ -440,33 +440,6 @@ export default function HomePage() {
             )}
           </div>
 
-          {/* Pre-built high-res sample spheres */}
-          <div className="pt-4 border-t border-white/5">
-            <p className="text-xs text-muted-foreground mb-3">
-              Or explore our hand selected briefs that output 16K spheres:
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {[
-                { stem: "env-bell-tower", label: "Bell Tower" },
-                { stem: "env-monkstown-castle", label: "Castle" },
-                { stem: "env-red-wall", label: "Red Wall" },
-                { stem: "env-peppermint-powerplant", label: "Powerplant" },
-                { stem: "env-gym", label: "Gym" },
-                { stem: "env-cozy-cafe", label: "Cozy Cafe" },
-                { stem: "env-luxury-ballroom", label: "Ballroom" },
-              ].map((s) => (
-                <button
-                  key={s.stem}
-                  disabled={generating}
-                  onClick={() => handleSampleSphere(s.stem, s.label)}
-                  className="px-3 py-1.5 text-xs rounded-full border border-white/10 bg-transparent text-muted-foreground hover:text-foreground hover:border-white/20 hover:bg-white/5 transition-all disabled:opacity-50"
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
           <Button
             onClick={handleGenerate}
             disabled={!prompt.trim() || generating}
