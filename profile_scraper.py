@@ -542,22 +542,26 @@ def build_about_me_prompt(profile: InfluencerProfile) -> str:
     bio_lower = (profile.bio or "").lower()
     name = profile.name
 
+    # Every environment includes: wall-mounted TV screens for videos, framed pictures on walls,
+    # and a central display area. This ensures the interactive markers feel native to the scene.
+    screen_desc = "Large flat-screen TVs mounted on walls showing content, elegant picture frames displaying photographs, a central holographic display pedestal"
+
     if any(w in bio_lower for w in ["tech", "review", "gadget", "phone", "computer", "software"]):
-        env = f"a sleek modern tech studio designed for {name}, dark walls with subtle colored LED accent lighting, multiple floating display screens, professional camera equipment, cinematic studio lighting"
+        env = f"a sleek modern tech studio personal space for {name}, dark walls with subtle colored LED accent lighting, {screen_desc}, professional camera equipment on tripods, cinematic studio lighting, cable management visible"
     elif any(w in bio_lower for w in ["music", "artist", "singer", "rapper", "producer", "dj"]):
-        env = f"a dramatic music studio and performance space for {name}, moody concert lighting, speakers, mixing console, neon accents, stage atmosphere"
+        env = f"a dramatic music studio and lounge for {name}, moody concert lighting, {screen_desc}, speakers, vinyl records on shelves, mixing console, neon accents, intimate performance atmosphere"
     elif any(w in bio_lower for w in ["fitness", "gym", "workout", "athlete", "sport"]):
-        env = f"a premium athletic training facility for {name}, dramatic spotlights, modern gym equipment, motivational atmosphere, dark concrete and steel"
+        env = f"a premium athletic personal space for {name}, dramatic spotlights, {screen_desc}, trophy case, motivational atmosphere, dark concrete and steel, gym equipment in background"
     elif any(w in bio_lower for w in ["fashion", "style", "model", "beauty", "makeup"]):
-        env = f"a luxury fashion showroom for {name}, marble floors, dramatic runway lighting, velvet curtains, gold accents, high-end boutique atmosphere"
+        env = f"a luxury fashion showroom personal space for {name}, marble floors, {screen_desc}, dramatic runway lighting, velvet curtains, gold accents, mannequins with outfits"
     elif any(w in bio_lower for w in ["food", "cook", "chef", "recipe", "kitchen"]):
-        env = f"a stunning professional kitchen and dining space for {name}, warm ambient lighting, copper accents, marble countertops, rustic modern design"
+        env = f"a stunning professional kitchen and dining lounge for {name}, warm ambient lighting, {screen_desc}, copper pots hanging, marble countertops, cookbook shelves"
     elif any(w in bio_lower for w in ["travel", "adventure", "explore", "outdoor"]):
-        env = f"a breathtaking travel lodge overlooking dramatic scenery for {name}, panoramic windows, warm wood interior, golden hour lighting, maps and globes"
+        env = f"a breathtaking travel lodge personal space for {name}, panoramic windows with scenic views, {screen_desc}, warm wood interior, vintage maps on walls, globes, camera gear"
     elif any(w in bio_lower for w in ["game", "gaming", "stream", "twitch", "esport"]):
-        env = f"an epic gaming command center for {name}, RGB lighting, multiple monitors, dark room with neon accents, futuristic setup"
+        env = f"an epic gaming command center for {name}, RGB lighting, {screen_desc}, multiple gaming monitors, dark room with neon accents, gaming chair, trophy shelf"
     else:
-        env = f"a stylish modern creator studio for {name}, professional lighting, clean design, floating display screens, warm atmospheric lighting"
+        env = f"a stylish modern creator studio personal space for {name}, professional warm lighting, clean design, {screen_desc}, bookshelves, comfortable seating area, warm atmospheric lighting"
 
     # Add color influence
     color_desc = ""
@@ -585,11 +589,11 @@ def build_markers(profile: InfluencerProfile) -> list[dict]:
     """Build marker data for interactive elements in the sphere."""
     markers = []
 
-    # Profile card — front and center
+    # Profile card — mounted display, slightly above eye level
     markers.append({
         "type": "profile",
         "yaw": 0,
-        "pitch": 5,
+        "pitch": 10,
         "data": {
             "name": profile.name,
             "handle": profile.handle,
@@ -605,20 +609,49 @@ def build_markers(profile: InfluencerProfile) -> list[dict]:
         },
     })
 
-    # Video markers — spread around at eye level
+    # Video markers — positioned like wall-mounted TV screens around the room
     if profile.youtube and profile.youtube.videos:
-        video_yaws = [-150, -100, -50, 50, 100, 150]
+        # TVs at eye level, spread around the room like a real studio
+        tv_positions = [
+            {"yaw": -130, "pitch": 8},   # Left wall TV
+            {"yaw": -70,  "pitch": 6},   # Left-center TV
+            {"yaw": 70,   "pitch": 6},   # Right-center TV
+            {"yaw": 130,  "pitch": 8},   # Right wall TV
+            {"yaw": -170, "pitch": 3},   # Far left TV
+            {"yaw": 170,  "pitch": 3},   # Far right TV
+        ]
         for i, video in enumerate(profile.youtube.videos[:6]):
+            pos = tv_positions[i] if i < len(tv_positions) else {"yaw": (i * 55) - 180, "pitch": 0}
             markers.append({
                 "type": "video",
-                "yaw": video_yaws[i] if i < len(video_yaws) else (i * 60 - 180),
-                "pitch": 0,
+                "yaw": pos["yaw"],
+                "pitch": pos["pitch"],
                 "data": {
                     "video_id": video.id,
                     "title": video.title,
                     "thumbnail_url": video.thumbnail_url,
                     "view_count": video.view_count,
                     "url": video.url,
+                },
+            })
+
+    # Image gallery markers — positioned like framed pictures on walls (above eye level)
+    if profile.instagram and profile.instagram.post_images:
+        frame_positions = [
+            {"yaw": -50,  "pitch": 18},  # Upper left frame
+            {"yaw": -20,  "pitch": 20},  # Upper center-left frame
+            {"yaw": 20,   "pitch": 20},  # Upper center-right frame
+            {"yaw": 50,   "pitch": 18},  # Upper right frame
+        ]
+        for i, img_url in enumerate(profile.instagram.post_images[:4]):
+            pos = frame_positions[i] if i < len(frame_positions) else {"yaw": (i * 30) - 60, "pitch": 20}
+            markers.append({
+                "type": "image",
+                "yaw": pos["yaw"],
+                "pitch": pos["pitch"],
+                "data": {
+                    "image_url": img_url,
+                    "source": "instagram",
                 },
             })
 

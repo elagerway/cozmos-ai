@@ -1020,21 +1020,10 @@ async def generate_about_me(body: dict):
             )
             update("compose", 55, "Environment ready")
 
-            # Step 3: Upscale thumbnails and composite
-            if profile.thumbnail_images:
-                update("compose", 58, f"Enhancing {len(profile.thumbnail_images)} thumbnails...")
-
-                def on_up_progress(done, total):
-                    pct = 58 + int(7 * (done / total))
-                    update("compose", pct, f"Enhancing image {done}/{total}...")
-
-                upscaled = loop.run_until_complete(
-                    upscale_all_parallel(profile.thumbnail_images, on_progress=on_up_progress)
-                )
-                update("compose", 66, "Compositing content onto environment...")
-                canvas = compose_on_environment(upscaled, environment)
-            else:
-                canvas = environment
+            # For About Me spheres, keep the environment clean — content is
+            # displayed via interactive markers (TV screens, picture frames)
+            # instead of compositing flat images onto the panorama
+            canvas = environment
 
             loop.close()
             update("compose", 70, "Sphere composed")
