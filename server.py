@@ -998,9 +998,16 @@ async def generate_from_prompt(body: dict):
 
 @app.post("/generate-from-uploads")
 async def generate_from_uploads(body: dict):
-    """Start sphere generation from base64-encoded uploaded images."""
+    """Start sphere generation from base64-encoded uploaded images.
+
+    If composite_tile_stem and composite_tile_base_url are provided,
+    composites the images onto the existing environment instead of
+    generating a new sphere from scratch.
+    """
     prompt = body.get("prompt", "Upload sphere")
     images_b64 = body.get("images", [])
+    composite_tile_stem = body.get("composite_tile_stem", "")
+    composite_tile_base_url = body.get("composite_tile_base_url", "")
 
     if not images_b64:
         return JSONResponse({"error": "No images provided"}, status_code=400)
@@ -1014,6 +1021,8 @@ async def generate_from_uploads(body: dict):
         "step": "init",
         "pct": 0,
         "label": "Starting...",
+        "composite_tile_stem": composite_tile_stem,
+        "composite_tile_base_url": composite_tile_base_url,
     }
 
     # Decode images
@@ -1057,10 +1066,38 @@ def run_pipeline_with_images(gen_id: str, raw_images: list[bytes]):
         loop.close()
         update("upscale", 65, f"Enhanced {len(upscaled)} images")
 
-        # Compose
-        update("compose", 70, "Composing sphere panorama...")
-        bg_color = [17, 17, 17]
-        canvas = compose_panorama(upscaled, bg_color)
+        # Compose — composite onto existing environment or create new
+        composite_stem = generations[gen_id].get("composite_tile_stem", "")
+        composite_base = generations[gen_id].get("composite_tile_base_url", "")
+
+        if composite_stem and composite_base:
+            # Download the existing environment's full image
+            update("compose", 68, "Loading existing environment...")
+            env_url = f"{composite_base}/{composite_stem}.jpg"
+            print(f"  Downloading environment from {env_url[:60]}...")
+            import requests as req
+            env_resp = req.get(env_url, timeout=30)
+            if env_resp.status_code == 200:
+                environment = pyvips.Image.new_from_buffer(env_resp.content, "")
+                if environment.bands == 4:
+                    environment = environment[:3]
+                # Resize to 16K if needed
+                if environment.width != CANVAS_W:
+                    environment = environment.resize(
+                        CANVAS_W / environment.width,
+                        kernel=pyvips.enums.Kernel.LANCZOS3,
+                        vscale=CANVAS_H / environment.height,
+                    )
+                update("compose", 70, "Compositing images onto environment...")
+                canvas = compose_on_environment(upscaled, environment)
+            else:
+                print(f"  Failed to load environment ({env_resp.status_code}), using dark bg")
+                update("compose", 70, "Composing sphere panorama...")
+                canvas = compose_panorama(upscaled, [17, 17, 17])
+        else:
+            update("compose", 70, "Composing sphere panorama...")
+            canvas = compose_panorama(upscaled, [17, 17, 17])
+
         update("compose", 80, "Panorama composed")
 
         # Tiles
