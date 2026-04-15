@@ -6,6 +6,7 @@ import "@photo-sphere-viewer/core/index.css"
 interface Props {
   imageUrl: string
   tileStem?: string | null
+  tileBaseUrl?: string | null
 }
 
 function getImageStem(url: string): string | null {
@@ -20,7 +21,7 @@ const LEVELS = [
   { width: 16384, cols: 16, rows: 8 },
 ]
 
-export function SphereViewer({ imageUrl, tileStem }: Props) {
+export function SphereViewer({ imageUrl, tileStem, tileBaseUrl }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<any>(null)
   const [ready, setReady] = useState(false)
@@ -48,14 +49,19 @@ export function SphereViewer({ imageUrl, tileStem }: Props) {
         )
         if (destroyed || !containerRef.current) return
 
+        // Use Supabase CDN if tileBaseUrl is set, otherwise local /spheres/
+        const base = tileBaseUrl
+          ? `${tileBaseUrl}/tiles/${stem}`
+          : `/spheres/tiles/${stem}`
+
         viewerRef.current = new Viewer({
           container: containerRef.current,
           adapter: EquirectangularTilesAdapter,
           panorama: {
-            baseUrl: `/spheres/tiles/${stem}/base.jpg`,
+            baseUrl: `${base}/base.jpg`,
             levels: LEVELS,
             tileUrl: (col: number, row: number, level: number) =>
-              `/spheres/tiles/${stem}/${level}/${col}_${row}.jpg`,
+              `${base}/${level}/${col}_${row}.jpg`,
           },
           defaultZoomLvl: 50,
           minFov: 15,
@@ -84,7 +90,7 @@ export function SphereViewer({ imageUrl, tileStem }: Props) {
       viewerRef.current?.destroy()
       viewerRef.current = null
     }
-  }, [imageUrl, tileStem, ready])
+  }, [imageUrl, tileStem, tileBaseUrl, ready])
 
   return (
     <div

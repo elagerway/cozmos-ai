@@ -55,6 +55,7 @@ export default function HomePage() {
   const liveProfile = detectSocialProfile(prompt)
 
   const [tileStem, setTileStem] = useState<string | null>(null)
+  const [tileBaseUrl, setTileBaseUrl] = useState<string | null>(null)
   const [durationS, setDurationS] = useState(52)
 
   async function handleGenerate() {
@@ -119,6 +120,7 @@ export default function HomePage() {
               setStep("done")
               setImageUrl(status.image_url || null)
               setTileStem(status.tile_stem || null)
+              setTileBaseUrl(status.tile_base_url || null)
               setDurationS(status.duration_s || 52)
               setSpec(getRandomSpec())
               setBgPrompt(
@@ -171,6 +173,7 @@ export default function HomePage() {
     setDone(false)
     setImageUrl(null)
     setTileStem(null)
+    setTileBaseUrl(null)
     setSpec(null)
     setBgPrompt(null)
     setPrompt("")
@@ -312,7 +315,7 @@ export default function HomePage() {
                 <SocialInsights profile={detectedProfile} />
               )}
 
-              {imageUrl && <SphereViewer imageUrl={imageUrl} tileStem={tileStem} />}
+              {imageUrl && <SphereViewer imageUrl={imageUrl} tileStem={tileStem} tileBaseUrl={tileBaseUrl} />}
 
               <div className="flex items-center justify-end gap-3">
                 <ShareButton generationId="demo" />

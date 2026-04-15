@@ -11,6 +11,7 @@ export interface PipelineStatus {
   label: string
   image_url?: string
   tile_stem?: string
+  tile_base_url?: string
   duration_s?: number
   image_count?: number
   error?: string
