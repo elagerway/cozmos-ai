@@ -42,12 +42,19 @@ export async function pollStatus(genId: string): Promise<PipelineStatus> {
 
 export async function startUploadGeneration(
   images: string[],
-  prompt: string
+  prompt: string,
+  compositeTileStem?: string,
+  compositeTileBaseUrl?: string
 ): Promise<{ id: string }> {
   const res = await fetch(`${PIPELINE_URL}/generate-from-uploads`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ images, prompt }),
+    body: JSON.stringify({
+      images,
+      prompt,
+      composite_tile_stem: compositeTileStem || "",
+      composite_tile_base_url: compositeTileBaseUrl || "",
+    }),
   })
   if (!res.ok) throw new Error("Failed to start upload generation")
   return res.json()

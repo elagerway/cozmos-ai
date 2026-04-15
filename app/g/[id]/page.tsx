@@ -4,8 +4,12 @@ import { use, useEffect, useState } from "react"
 import Link from "next/link"
 import { SphereViewer } from "@/components/SphereViewer"
 import { SphereSpecViewer } from "@/components/SphereSpecViewer"
+import { ImageUploader } from "@/components/ImageUploader"
 import { getGeneration } from "@/lib/dummy-data"
 import { supabase, GenerationRow } from "@/lib/supabase"
+import { startUploadGeneration, pollStatus } from "@/lib/pipeline-client"
+import { GenerationProgress } from "@/components/GenerationProgress"
+import { PipelineStep } from "@/lib/types"
 
 interface ViewData {
   prompt: string
@@ -27,6 +31,10 @@ export default function PublicSharePage({
   const [viewData, setViewData] = useState<ViewData | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [step, setStep] = useState<PipelineStep>("scan_profile")
+  const [pct, setPct] = useState(0)
+  const [genLabel, setGenLabel] = useState("")
 
   useEffect(() => {
     // Check hardcoded examples first
@@ -130,15 +138,90 @@ export default function PublicSharePage({
         )}
         <p className="text-muted-foreground mb-6">{viewData.prompt}</p>
 
-        {viewData.image_url && (
-          <SphereViewer
-            imageUrl={viewData.image_url}
-            tileStem={viewData.tile_stem}
-            tileBaseUrl={viewData.tile_base_url}
-          />
+        {generating ? (
+          <div className="flex items-center justify-center min-h-[400px]">
+            <GenerationProgress
+              currentStep={step}
+              pct={pct}
+              label={genLabel}
+              hasSocialProfile={false}
+            />
+          </div>
+        ) : (
+          <>
+            {viewData.image_url && (
+              <SphereViewer
+                imageUrl={viewData.image_url}
+                tileStem={viewData.tile_stem}
+                tileBaseUrl={viewData.tile_base_url}
+              />
+            )}
+
+            <div className="mt-6">
+              <ImageUploader
+                onUpload={async (images, composite) => {
+                  const isComposite = composite && viewData.tile_stem && viewData.tile_base_url
+                  setGenerating(true)
+                  setStep("scan_profile")
+                  setPct(0)
+                  setGenLabel(isComposite ? "Compositing onto environment..." : "Processing uploads...")
+
+                  try {
+                    const { id: genId } = await startUploadGeneration(
+                      images,
+                      viewData.prompt,
+                      isComposite ? viewData.tile_stem || undefined : undefined,
+                      isComposite ? viewData.tile_base_url || undefined : undefined,
+                    )
+
+                    let pollFailures = 0
+                    const poll = setInterval(async () => {
+                      try {
+                        const status = await pollStatus(genId)
+                        pollFailures = 0
+                        setPct(status.pct)
+                        setGenLabel(status.label)
+                        if (status.step === "scrape") setStep("scan_profile")
+                        else if (status.step === "upscale") setStep("extract_style")
+                        else if (status.step === "compose") setStep("bg_prompt")
+                        else if (status.step === "tiles" || status.step === "save") setStep("process")
+
+                        if (status.status === "done") {
+                          clearInterval(poll)
+                          setViewData({
+                            ...viewData,
+                            image_url: status.image_url || viewData.image_url,
+                            tile_stem: status.tile_stem || viewData.tile_stem,
+                            tile_base_url: status.tile_base_url || viewData.tile_base_url,
+                          })
+                          setGenerating(false)
+                        } else if (status.status === "failed") {
+                          clearInterval(poll)
+                          setGenLabel(`Error: ${status.error}`)
+                          setGenerating(false)
+                        }
+                      } catch {
+                        pollFailures++
+                        if (pollFailures >= 10) {
+                          clearInterval(poll)
+                          setGenLabel("Lost connection — please try again")
+                          setGenerating(false)
+                        }
+                      }
+                    }, 1000)
+                  } catch {
+                    setGenLabel("Failed to start — please try again")
+                    setGenerating(false)
+                  }
+                }}
+                disabled={generating}
+                hasExistingSphere={!!(viewData.tile_stem && viewData.tile_base_url)}
+              />
+            </div>
+          </>
         )}
 
-        {viewData.sphere_spec && viewData.bg_prompt && (
+        {!generating && viewData.sphere_spec && viewData.bg_prompt && (
           <div className="mt-6">
             <SphereSpecViewer spec={viewData.sphere_spec} bgPrompt={viewData.bg_prompt} />
           </div>

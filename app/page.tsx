@@ -218,12 +218,15 @@ export default function HomePage() {
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
-  async function handleUpload(images: string[]) {
-    setSubmittedPrompt("Custom image upload")
+  async function handleUpload(images: string[], composite: boolean) {
+    const isComposite = composite && tileStem && tileBaseUrl
+    setSubmittedPrompt(isComposite ? "Compositing images onto sphere" : "Custom image upload")
     setDetectedProfile(null)
     setGenerating(true)
     setDone(false)
     setImageUrl(null)
+    const prevTileStem = tileStem
+    const prevTileBaseUrl = tileBaseUrl
     setTileStem(null)
     setTileBaseUrl(null)
     setLowResWarning(false)
@@ -231,7 +234,7 @@ export default function HomePage() {
     setBgPrompt(null)
     setStep("scan_profile")
     setPct(0)
-    setLabel("Uploading images...")
+    setLabel(isComposite ? "Compositing onto environment..." : "Uploading images...")
 
     setTimeout(() => {
       resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
@@ -240,7 +243,12 @@ export default function HomePage() {
     cleanupRef.current?.()
 
     try {
-      const { id: genId } = await startUploadGeneration(images, prompt || "Custom upload sphere")
+      const { id: genId } = await startUploadGeneration(
+        images,
+        prompt || "Custom upload sphere",
+        isComposite ? prevTileStem || undefined : undefined,
+        isComposite ? prevTileBaseUrl || undefined : undefined,
+      )
 
       let pollFailures = 0
       const poll = setInterval(async () => {
@@ -504,7 +512,7 @@ export default function HomePage() {
 
               {/* Low-res warning */}
               {lowResWarning && (
-                <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-5 space-y-4">
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
                   <div className="flex items-start gap-3">
                     <svg className="w-5 h-5 text-amber-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
@@ -514,13 +522,19 @@ export default function HomePage() {
                         High resolution images could not be found.
                       </p>
                       <p className="text-sm text-amber-200/70 mt-1">
-                        In order to obtain the best results when using this demo, please point to a destination that has 4K or preferably 8K imagery for your sphere. Alternatively, you can upload your images to be rendered into your sphere using the tool below.
+                        For best results, point to a source with 4K+ imagery or upload your own images below.
                       </p>
                     </div>
                   </div>
-                  <ImageUploader onUpload={handleUpload} disabled={generating} />
                 </div>
               )}
+
+              {/* Image uploader — always visible after sphere renders */}
+              <ImageUploader
+                onUpload={handleUpload}
+                disabled={generating}
+                hasExistingSphere={!!(tileStem && tileBaseUrl)}
+              />
 
               <div className="flex items-center justify-end gap-3">
                 <ShareButton generationId="demo" />
