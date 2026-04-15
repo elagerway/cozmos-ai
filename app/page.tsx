@@ -432,14 +432,6 @@ export default function HomePage() {
             )}
           </div>
 
-          <Button
-            onClick={handleGenerate}
-            disabled={!prompt.trim() || generating}
-            className="w-full h-12 text-base font-semibold bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white border-0"
-          >
-            {generating ? "Generating..." : "Generate Sphere"}
-          </Button>
-
           {/* Pre-built high-res sample spheres */}
           <div className="pt-4 border-t border-white/5">
             <p className="text-xs text-muted-foreground mb-3">
@@ -469,6 +461,14 @@ export default function HomePage() {
               ))}
             </div>
           </div>
+
+          <Button
+            onClick={handleGenerate}
+            disabled={!prompt.trim() || generating}
+            className="w-full h-12 text-base font-semibold bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white border-0"
+          >
+            {generating ? "Generating..." : "Generate Sphere"}
+          </Button>
         </div>
       </section>
 
