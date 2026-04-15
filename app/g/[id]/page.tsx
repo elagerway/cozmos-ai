@@ -4,6 +4,7 @@ import { use, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { SphereViewer } from "@/components/SphereViewer"
+import { InteractiveSphereViewer } from "@/components/InteractiveSphereViewer"
 import { SphereSpecViewer } from "@/components/SphereSpecViewer"
 import { ImageUploader } from "@/components/ImageUploader"
 import { getGeneration } from "@/lib/dummy-data"
@@ -21,6 +22,7 @@ interface ViewData {
   sphere_spec: any
   bg_prompt: string | null
   brand: string | null
+  markers: any[] | null
 }
 
 export default function PublicSharePage({
@@ -62,6 +64,7 @@ export default function PublicSharePage({
         sphere_spec: gen.sphere_spec,
         bg_prompt: gen.bg_prompt,
         brand: (gen as any).brand || null,
+        markers: null,
       })
       setLoading(false)
       return
@@ -84,16 +87,26 @@ export default function PublicSharePage({
         if (error || !data) {
           setNotFound(true)
         } else {
-          const row = data as GenerationRow
+          const row = data as GenerationRow & { environment?: string }
+          let markers = null
+          let profileName = row.brand
+          if (row.environment) {
+            try {
+              const envData = JSON.parse(row.environment)
+              markers = envData.markers || null
+              if (envData.profile?.name) profileName = envData.profile.name
+            } catch {}
+          }
           setViewData({
             prompt: row.prompt,
-            title: row.brand ? `${row.brand} — Generated Sphere` : "Generated Sphere",
+            title: profileName ? `${profileName} — Generated Sphere` : "Generated Sphere",
             image_url: row.image_url,
             tile_stem: row.tile_stem,
             tile_base_url: row.tile_base_url,
             sphere_spec: null,
             bg_prompt: null,
             brand: row.brand,
+            markers,
           })
         }
         setLoading(false)
@@ -164,11 +177,20 @@ export default function PublicSharePage({
           <>
             {viewData.image_url && (
               <div className="relative group">
-                <SphereViewer
-                  imageUrl={viewData.image_url}
-                  tileStem={viewData.tile_stem}
-                  tileBaseUrl={viewData.tile_base_url}
-                />
+                {viewData.markers && viewData.markers.length > 0 ? (
+                  <InteractiveSphereViewer
+                    imageUrl={viewData.image_url}
+                    tileStem={viewData.tile_stem}
+                    tileBaseUrl={viewData.tile_base_url}
+                    markers={viewData.markers}
+                  />
+                ) : (
+                  <SphereViewer
+                    imageUrl={viewData.image_url}
+                    tileStem={viewData.tile_stem}
+                    tileBaseUrl={viewData.tile_base_url}
+                  />
+                )}
                 {/* Delete button — invisible until hover, hidden in fullscreen */}
                 {!isFullscreen && (
                   <button
