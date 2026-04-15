@@ -664,8 +664,12 @@ async def generate(body: dict):
     prompt = body.get("prompt", "")
     source_url = body.get("url", "").strip()
 
+    # If no brand or URL, try AI generation from the prompt
     if not brand and not source_url:
-        return JSONResponse({"error": "brand or url is required"}, status_code=400)
+        if not prompt:
+            return JSONResponse({"error": "brand, url, or prompt is required"}, status_code=400)
+        # Forward to prompt-based generation
+        return await generate_from_prompt({"prompt": prompt, "method": "direct"})
 
     slug = brand or "custom"
     gen_id = f"gen-{slug}-{uuid.uuid4().hex[:8]}"
@@ -680,6 +684,103 @@ async def generate(body: dict):
     }
 
     executor.submit(run_pipeline, gen_id, brand, source_url)
+    return {"id": gen_id}
+
+
+@app.post("/generate-from-prompt")
+async def generate_from_prompt(body: dict):
+    """Generate a sphere from a text prompt using AI image generation."""
+    prompt = body.get("prompt", "")
+    method = body.get("method", "direct")  # "direct" or "cubemap"
+
+    if not prompt:
+        return JSONResponse({"error": "prompt is required"}, status_code=400)
+
+    gen_id = f"gen-ai-{uuid.uuid4().hex[:8]}"
+    generations[gen_id] = {
+        "id": gen_id,
+        "brand": "",
+        "prompt": prompt,
+        "status": "running",
+        "step": "init",
+        "pct": 0,
+        "label": "Starting AI generation...",
+    }
+
+    def run_prompt_pipeline(gen_id, prompt, method):
+        start = time.time()
+        def update(step, pct, label):
+            generations[gen_id].update({"step": step, "pct": pct, "label": label})
+
+        try:
+            from sphere_gen import generate_sphere_from_prompt
+
+            if method == "cubemap":
+                update("scrape", 5, "Generating 6 cubemap faces...")
+            else:
+                update("scrape", 5, "Generating panorama from prompt...")
+
+            loop = asyncio.new_event_loop()
+            canvas = loop.run_until_complete(
+                generate_sphere_from_prompt(prompt, method)
+            )
+            loop.close()
+            update("compose", 70, "Panorama generated")
+
+            # Tiles
+            def on_tile_progress(done, total):
+                pct = 72 + int(23 * (done / total))
+                update("tiles", pct, f"Generating tiles ({done}/{total})...")
+
+            update("tiles", 72, "Generating tile pyramid...")
+            generate_tiles(canvas, gen_id, on_progress=on_tile_progress)
+            update("tiles", 95, "Tiles generated")
+
+            # Save
+            update("save", 96, "Saving to cloud...")
+            duration = int(time.time() - start)
+
+            if SUPABASE_URL:
+                tile_base_url = f"{SUPABASE_URL}/storage/v1/object/public/spheres"
+                image_url = f"{tile_base_url}/{gen_id}.jpg"
+            else:
+                tile_base_url = ""
+                image_url = f"/spheres/{gen_id}.jpg"
+
+            save_generation_record(gen_id, {
+                "brand": "",
+                "prompt": prompt,
+                "status": "done",
+                "step": "done",
+                "step_label": "Your sphere is ready",
+                "image_url": image_url,
+                "tile_stem": gen_id,
+                "tile_base_url": tile_base_url,
+                "duration_s": duration,
+                "image_count": 6 if method == "cubemap" else 1,
+                "cost_usd": 0.05 if method == "cubemap" else 0.01,
+            })
+
+            generations[gen_id].update({
+                "status": "done",
+                "step": "done",
+                "pct": 100,
+                "label": "Your sphere is ready",
+                "image_url": image_url,
+                "tile_stem": gen_id,
+                "tile_base_url": tile_base_url,
+                "duration_s": duration,
+                "image_count": 6 if method == "cubemap" else 1,
+            })
+            print(f"Prompt pipeline complete: {gen_id} in {duration}s")
+
+        except Exception as e:
+            print(f"Prompt pipeline error: {e}")
+            import traceback
+            traceback.print_exc()
+            generations[gen_id].update({"status": "failed", "error": str(e)})
+
+    executor.submit(run_prompt_pipeline, gen_id, prompt, method)
     return {"id": gen_id}
 
 
