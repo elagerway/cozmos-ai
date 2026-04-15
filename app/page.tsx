@@ -353,7 +353,7 @@ export default function HomePage() {
         setTileBaseUrl(SUPABASE_CDN)
       }
       setSpec(null)
-      setBgPrompt(`Pre-built 16K equirectangular environment from Polyhaven. 4-level progressive tile loading for razor-sharp detail at any zoom level.`)
+      setBgPrompt(`Pre-built 16K equirectangular environment. 4-level progressive tile loading for razor-sharp detail at any zoom level.`)
       setDone(true)
       setGenerating(false)
     }, 3200))
