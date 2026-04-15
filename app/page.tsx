@@ -478,7 +478,7 @@ export default function HomePage() {
                   cleanupRef.current?.()
                   handleReset()
                 }}
-                className="text-xs text-muted-foreground hover:text-red-400 transition-colors"
+                className="px-6 py-2 text-sm font-medium rounded-lg border border-white/10 text-muted-foreground hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/5 transition-all"
               >
                 Cancel
               </button>
