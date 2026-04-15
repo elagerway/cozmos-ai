@@ -15,6 +15,7 @@ export interface PipelineStatus {
   duration_s?: number
   image_count?: number
   error?: string
+  low_res_warning?: boolean
 }
 
 export async function startGeneration(
@@ -37,6 +38,19 @@ export async function pollStatus(genId: string): Promise<PipelineStatus> {
   const data = await res.json()
   if (data.error === "not found") throw new Error("Failed to poll status")
   return data
+}
+
+export async function startUploadGeneration(
+  images: string[],
+  prompt: string
+): Promise<{ id: string }> {
+  const res = await fetch(`${PIPELINE_URL}/generate-from-uploads`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ images, prompt }),
+  })
+  if (!res.ok) throw new Error("Failed to start upload generation")
+  return res.json()
 }
 
 export async function checkPipelineHealth(): Promise<boolean> {

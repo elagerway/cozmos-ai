@@ -18,7 +18,8 @@ import {
 } from "@/lib/dummy-data"
 import { SOCIAL_SAMPLE_BRIEFS, detectSocialProfile, SocialProfile } from "@/lib/social-profiles"
 import { simulatePipeline } from "@/lib/simulate-pipeline"
-import { startGeneration, pollStatus, checkPipelineHealth } from "@/lib/pipeline-client"
+import { startGeneration, startUploadGeneration, pollStatus, checkPipelineHealth } from "@/lib/pipeline-client"
+import { ImageUploader } from "@/components/ImageUploader"
 import { PipelineStep, SphereSpec } from "@/lib/types"
 import { fetchGenerations, GenerationRow } from "@/lib/supabase"
 
@@ -36,6 +37,7 @@ export default function HomePage() {
   const [bgPrompt, setBgPrompt] = useState<string | null>(null)
   const [submittedPrompt, setSubmittedPrompt] = useState("")
   const [detectedProfile, setDetectedProfile] = useState<SocialProfile | null>(null)
+  const [lowResWarning, setLowResWarning] = useState(false)
 
   const resultRef = useRef<HTMLDivElement>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
@@ -49,9 +51,13 @@ export default function HomePage() {
       ? EXAMPLES.filter((e) => new Set(JSON.parse(stored) as string[]).has(e.id))
       : EXAMPLES.filter((e) => e.featured)
 
-    // Load generated spheres from Supabase (these work everywhere)
+    // Load generated spheres from Supabase, but only show ones the user starred
+    const featuredSet = stored
+      ? new Set(JSON.parse(stored) as string[])
+      : new Set(EXAMPLES.filter((e) => e.featured).map((e) => e.id))
+
     fetchGenerations().then((rows) => {
-      const generated: Example[] = rows.slice(0, 6).map((r: GenerationRow) => ({
+      const generated: Example[] = rows.map((r: GenerationRow) => ({
         id: r.id,
         prompt: r.prompt,
         status: "done" as const,
@@ -70,12 +76,9 @@ export default function HomePage() {
         tile_stem: r.tile_stem,
         tile_base_url: r.tile_base_url,
       }))
-      // Only show hardcoded examples if tiles exist locally (dev), otherwise just Supabase
-      if (generated.length > 0) {
-        setFeaturedExamples(generated)
-      } else {
-        setFeaturedExamples(hardcoded)
-      }
+      // Only show starred/featured items on the homepage
+      const all = [...hardcoded, ...generated]
+      setFeaturedExamples(all.filter((e) => featuredSet.has(e.id)))
     })
   }, [])
 
@@ -99,6 +102,7 @@ export default function HomePage() {
     setDone(false)
     setImageUrl(null)
     setTileStem(null)
+    setLowResWarning(false)
     setSpec(null)
     setBgPrompt(null)
     setStep("scan_profile")
@@ -136,6 +140,9 @@ export default function HomePage() {
             pollFailures = 0
             setPct(status.pct)
             setLabel(status.label)
+
+            // Check for low-res warning
+            if (status.low_res_warning) setLowResWarning(true)
 
             // Map pipeline steps to UI steps
             if (status.step === "scrape") setStep("scan_profile")
@@ -202,12 +209,85 @@ export default function HomePage() {
     setImageUrl(null)
     setTileStem(null)
     setTileBaseUrl(null)
+    setLowResWarning(false)
     setSpec(null)
     setBgPrompt(null)
     setPrompt("")
     setSubmittedPrompt("")
     setDetectedProfile(null)
     window.scrollTo({ top: 0, behavior: "smooth" })
+  }
+
+  async function handleUpload(images: string[]) {
+    setSubmittedPrompt("Custom image upload")
+    setDetectedProfile(null)
+    setGenerating(true)
+    setDone(false)
+    setImageUrl(null)
+    setTileStem(null)
+    setTileBaseUrl(null)
+    setLowResWarning(false)
+    setSpec(null)
+    setBgPrompt(null)
+    setStep("scan_profile")
+    setPct(0)
+    setLabel("Uploading images...")
+
+    setTimeout(() => {
+      resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    }, 100)
+
+    cleanupRef.current?.()
+
+    try {
+      const { id: genId } = await startUploadGeneration(images, prompt || "Custom upload sphere")
+
+      let pollFailures = 0
+      const poll = setInterval(async () => {
+        try {
+          const status = await pollStatus(genId)
+          pollFailures = 0
+          setPct(status.pct)
+          setLabel(status.label)
+
+          if (status.step === "scrape") setStep("scan_profile")
+          else if (status.step === "upscale") setStep("extract_style")
+          else if (status.step === "compose") setStep("bg_prompt")
+          else if (status.step === "tiles" || status.step === "save") setStep("process")
+
+          if (status.status === "done") {
+            clearInterval(poll)
+            setStep("done")
+            setImageUrl(status.image_url || null)
+            setTileStem(status.tile_stem || null)
+            setTileBaseUrl(status.tile_base_url || null)
+            setDurationS(status.duration_s || 52)
+            setSpec(getRandomSpec())
+            setBgPrompt(
+              `360° sphere composed from ${status.image_count || images.length} uploaded images, AI-upscaled to 16K resolution.`
+            )
+            setDone(true)
+            setGenerating(false)
+          } else if (status.status === "failed") {
+            clearInterval(poll)
+            setLabel(`Error: ${status.error}`)
+            setGenerating(false)
+          }
+        } catch {
+          pollFailures++
+          if (pollFailures >= 10) {
+            clearInterval(poll)
+            setLabel("Lost connection to pipeline — please try again")
+            setGenerating(false)
+          }
+        }
+      }, 1000)
+
+      cleanupRef.current = () => clearInterval(poll)
+    } catch {
+      setLabel("Failed to start upload — please try again")
+      setGenerating(false)
+    }
   }
 
   // Mix social and standard sample briefs
@@ -309,6 +389,30 @@ export default function HomePage() {
           >
             {generating ? "Generating..." : "Generate Sphere"}
           </Button>
+
+          {/* Pre-built high-res sample spheres */}
+          <div className="pt-4 border-t border-white/5">
+            <p className="text-xs text-muted-foreground mb-3">
+              Or explore a pre-built 16K sphere:
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { id: "sample-cozy-cafe", label: "Cozy Cafe" },
+                { id: "sample-outdoor-storm", label: "Storm Sky" },
+                { id: "sample-bell-tower", label: "Bell Tower" },
+                { id: "sample-red-wall", label: "Red Wall" },
+                { id: "sample-peppermint-powerplant", label: "Powerplant" },
+              ].map((s) => (
+                <Link
+                  key={s.id}
+                  href={`/g/${s.id}`}
+                  className="px-3 py-1.5 text-xs rounded-full border border-white/10 bg-transparent text-muted-foreground hover:text-foreground hover:border-white/20 hover:bg-white/5 transition-all"
+                >
+                  {s.label}
+                </Link>
+              ))}
+            </div>
+          </div>
         </div>
       </section>
 
@@ -344,6 +448,26 @@ export default function HomePage() {
               )}
 
               {imageUrl && <SphereViewer imageUrl={imageUrl} tileStem={tileStem} tileBaseUrl={tileBaseUrl} />}
+
+              {/* Low-res warning */}
+              {lowResWarning && (
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-5 space-y-4">
+                  <div className="flex items-start gap-3">
+                    <svg className="w-5 h-5 text-amber-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                    </svg>
+                    <div>
+                      <p className="text-sm text-amber-200 font-medium">
+                        High resolution images could not be found.
+                      </p>
+                      <p className="text-sm text-amber-200/70 mt-1">
+                        In order to obtain the best results when using this demo, please point to a destination that has 4K or preferably 8K imagery for your sphere. Alternatively, you can upload your images to be rendered into your sphere using the tool below.
+                      </p>
+                    </div>
+                  </div>
+                  <ImageUploader onUpload={handleUpload} disabled={generating} />
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-3">
                 <ShareButton generationId="demo" />
