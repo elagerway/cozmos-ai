@@ -397,11 +397,14 @@ export default function HomePage() {
             </p>
             <div className="flex flex-wrap gap-2">
               {[
-                { id: "sample-cozy-cafe", label: "Cozy Cafe" },
-                { id: "sample-outdoor-storm", label: "Storm Sky" },
                 { id: "sample-bell-tower", label: "Bell Tower" },
                 { id: "sample-red-wall", label: "Red Wall" },
                 { id: "sample-peppermint-powerplant", label: "Powerplant" },
+                { id: "sample-gym", label: "Gym" },
+                { id: "sample-venice-sunset", label: "Venice Sunset" },
+                { id: "sample-outdoor-storm", label: "Storm Sky" },
+                { id: "sample-cozy-cafe", label: "Cozy Cafe" },
+                { id: "sample-luxury-ballroom", label: "Ballroom" },
               ].map((s) => (
                 <Link
                   key={s.id}
