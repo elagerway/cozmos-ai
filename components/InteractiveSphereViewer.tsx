@@ -46,75 +46,102 @@ const LEVELS = [
 function ProfileCardHTML(data: ProfileMarkerData): string {
   return `
     <div style="
-      background: rgba(0,0,0,0.75);
-      backdrop-filter: blur(20px);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 16px;
-      padding: 24px;
-      width: 320px;
+      background: linear-gradient(145deg, rgba(20,20,20,0.92), rgba(10,10,10,0.95));
+      backdrop-filter: blur(24px);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 20px;
+      padding: 28px;
+      width: 340px;
       color: white;
       font-family: Inter, system-ui, sans-serif;
       cursor: default;
+      box-shadow: 0 0 40px rgba(0,150,255,0.15), 0 20px 60px rgba(0,0,0,0.6);
     ">
       <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;">
-        ${data.profile_image ? `<img src="${data.profile_image}" style="width:64px;height:64px;border-radius:50%;border:2px solid rgba(255,255,255,0.2);" />` : ""}
+        ${data.profile_image ? `<img src="${data.profile_image}" style="width:72px;height:72px;border-radius:50%;border:3px solid rgba(59,130,246,0.5);box-shadow:0 0 20px rgba(59,130,246,0.3);" />` : ""}
         <div>
-          <div style="font-size:18px;font-weight:700;">${data.name}</div>
-          <div style="font-size:13px;color:rgba(255,255,255,0.5);">${data.handle}</div>
+          <div style="font-size:20px;font-weight:800;letter-spacing:-0.02em;">${data.name}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.4);margin-top:2px;">${data.handle}</div>
         </div>
       </div>
-      ${data.bio ? `<p style="font-size:13px;color:rgba(255,255,255,0.7);line-height:1.5;margin:0 0 16px 0;">${data.bio.slice(0, 150)}${data.bio.length > 150 ? "..." : ""}</p>` : ""}
-      <div style="display:flex;flex-wrap:wrap;gap:8px 16px;font-size:11px;color:rgba(255,255,255,0.5);">
-        ${data.subscriber_count ? `<span>YT: ${data.subscriber_count}</span>` : ""}
-        ${(data as any).instagram_handle ? `<span>IG: @${(data as any).instagram_handle}${(data as any).instagram_followers ? ` (${((data as any).instagram_followers / 1000000).toFixed(1)}M)` : ""}</span>` : ""}
-        ${data.twitter_handle ? `<span>X: @${data.twitter_handle}</span>` : ""}
-        ${(data as any).tiktok_handle ? `<span>TT: @${(data as any).tiktok_handle}${(data as any).tiktok_followers ? ` (${(data as any).tiktok_followers})` : ""}</span>` : ""}
+      ${data.bio ? `<p style="font-size:13px;color:rgba(255,255,255,0.65);line-height:1.6;margin:0 0 16px 0;">${data.bio.slice(0, 160)}${data.bio.length > 160 ? "..." : ""}</p>` : ""}
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;">
+        ${data.subscriber_count ? `<span style="padding:4px 10px;border-radius:20px;background:rgba(255,0,0,0.15);border:1px solid rgba(255,0,0,0.2);font-size:11px;color:rgba(255,100,100,0.9);">YT ${data.subscriber_count}</span>` : ""}
+        ${(data as any).instagram_handle ? `<span style="padding:4px 10px;border-radius:20px;background:rgba(225,48,108,0.15);border:1px solid rgba(225,48,108,0.2);font-size:11px;color:rgba(225,130,170,0.9);">IG @${(data as any).instagram_handle}</span>` : ""}
+        ${data.twitter_handle ? `<span style="padding:4px 10px;border-radius:20px;background:rgba(29,155,240,0.15);border:1px solid rgba(29,155,240,0.2);font-size:11px;color:rgba(100,180,240,0.9);">X @${data.twitter_handle}</span>` : ""}
+        ${(data as any).tiktok_handle ? `<span style="padding:4px 10px;border-radius:20px;background:rgba(0,242,234,0.1);border:1px solid rgba(0,242,234,0.2);font-size:11px;color:rgba(100,242,234,0.9);">TT @${(data as any).tiktok_handle}</span>` : ""}
       </div>
       ${data.channel_url ? `<a href="${data.channel_url}" target="_blank" style="
-        display:inline-block;margin-top:16px;padding:8px 20px;
-        background:rgba(255,0,0,0.8);border-radius:8px;
+        display:inline-block;padding:10px 24px;
+        background:linear-gradient(135deg, rgba(59,130,246,0.8), rgba(34,211,238,0.8));
+        border-radius:10px;
         color:white;font-size:13px;font-weight:600;text-decoration:none;
+        box-shadow:0 4px 15px rgba(59,130,246,0.3);
       ">Visit Channel</a>` : ""}
     </div>
   `
 }
 
 function VideoCardHTML(data: VideoMarkerData): string {
+  // Styled like a wall-mounted TV screen with bezel
   return `
     <div class="video-marker" data-video-id="${data.video_id}" style="
-      background: rgba(0,0,0,0.8);
-      backdrop-filter: blur(16px);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 12px;
-      width: 280px;
+      background: #0a0a0a;
+      border: 6px solid #1a1a1a;
+      border-radius: 4px;
+      width: 300px;
       overflow: hidden;
       color: white;
       font-family: Inter, system-ui, sans-serif;
       cursor: pointer;
-      transition: transform 0.2s, border-color 0.2s;
-    " onmouseenter="this.style.borderColor='rgba(255,255,255,0.3)';this.style.transform='scale(1.02)'"
-       onmouseleave="this.style.borderColor='rgba(255,255,255,0.1)';this.style.transform='scale(1)'">
-      <div style="position:relative;">
+      box-shadow: 0 0 30px rgba(0,0,0,0.8), 0 0 60px rgba(100,150,255,0.08), inset 0 0 20px rgba(0,0,0,0.5);
+      transition: transform 0.2s, box-shadow 0.2s;
+    " onmouseenter="this.style.boxShadow='0 0 30px rgba(0,0,0,0.8), 0 0 80px rgba(100,150,255,0.2), inset 0 0 20px rgba(0,0,0,0.5)';this.style.transform='scale(1.03)'"
+       onmouseleave="this.style.boxShadow='0 0 30px rgba(0,0,0,0.8), 0 0 60px rgba(100,150,255,0.08), inset 0 0 20px rgba(0,0,0,0.5)';this.style.transform='scale(1)'">
+      <div style="position:relative;border-bottom:1px solid #222;">
         <img src="${data.thumbnail_url}" style="width:100%;aspect-ratio:16/9;object-fit:cover;display:block;" />
         <div style="
           position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-          background:rgba(0,0,0,0.3);
+          background:rgba(0,0,0,0.25);
         ">
           <div style="
-            width:48px;height:48px;border-radius:50%;
-            background:rgba(255,0,0,0.9);
+            width:52px;height:52px;border-radius:50%;
+            background:rgba(255,0,0,0.85);
             display:flex;align-items:center;justify-content:center;
+            box-shadow:0 4px 20px rgba(255,0,0,0.4);
           ">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
           </div>
         </div>
       </div>
-      <div style="padding:12px;">
-        <div style="font-size:13px;font-weight:600;line-height:1.3;margin-bottom:4px;
-          overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">
+      <div style="padding:10px 12px;background:linear-gradient(180deg,#111,#0a0a0a);">
+        <div style="font-size:12px;font-weight:600;line-height:1.3;
+          overflow:hidden;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;">
           ${data.title}
         </div>
-        ${data.view_count ? `<div style="font-size:11px;color:rgba(255,255,255,0.4);">${data.view_count}</div>` : ""}
+        ${data.view_count ? `<div style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:3px;">${data.view_count}</div>` : ""}
+      </div>
+    </div>
+  `
+}
+
+function ImageFrameHTML(data: { image_url: string; source: string }): string {
+  // Styled like a picture frame on the wall
+  return `
+    <div style="
+      background: linear-gradient(145deg, #2a2218, #1a1510);
+      padding: 8px;
+      border-radius: 2px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.05);
+      width: 180px;
+      cursor: default;
+    ">
+      <div style="
+        border: 2px solid #3a3020;
+        border-radius: 1px;
+        overflow: hidden;
+      ">
+        <img src="${data.image_url}" style="width:100%;aspect-ratio:1;object-fit:cover;display:block;" />
       </div>
     </div>
   `
@@ -182,7 +209,8 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
         const markersPlugin = viewer.getPlugin(MarkersPlugin) as any
         if (!markersPlugin) return
 
-        for (const marker of markers) {
+        for (let i = 0; i < markers.length; i++) {
+          const marker = markers[i];
           const yawRad = (marker.yaw * Math.PI) / 180
           const pitchRad = (marker.pitch * Math.PI) / 180
 
@@ -202,6 +230,13 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
               html: VideoCardHTML(vdata),
               anchor: "center center",
               data: vdata,
+            } as any)
+          } else if (marker.type === "image") {
+            markersPlugin.addMarker({
+              id: `image-${i}`,
+              position: { yaw: yawRad, pitch: pitchRad },
+              html: ImageFrameHTML(marker.data as any),
+              anchor: "center center",
             } as any)
           }
         }
