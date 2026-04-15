@@ -58,6 +58,41 @@ class InfluencerProfile:
     thumbnail_images: list[bytes] = field(default_factory=list)
 
 
+async def search_youtube_handle(name: str) -> str | None:
+    """Search YouTube for a person/brand name and return their channel handle."""
+    search_url = f"https://www.youtube.com/results?search_query={name.replace(' ', '+')}&sp=EgIQAg%3D%3D"
+
+    try:
+        async with httpx.AsyncClient(
+            follow_redirects=True, timeout=10.0,
+            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
+        ) as client:
+            resp = await client.get(search_url)
+            if resp.status_code != 200:
+                return None
+
+            # Extract channel handles from search results
+            handles = re.findall(r'"channelHandleText":\{"runs":\[\{"text":"@([^"]+)"\}', resp.text)
+            if handles:
+                print(f"  YouTube search found handle: @{handles[0]}")
+                return handles[0]
+
+            # Try extracting channel URLs
+            channel_ids = re.findall(r'"channelId":"([^"]+)"', resp.text)
+            if channel_ids:
+                # Get the handle from the channel page
+                ch_resp = await client.get(f"https://www.youtube.com/channel/{channel_ids[0]}")
+                if ch_resp.status_code == 200:
+                    handle_match = re.search(r'"channelHandleText":\{"runs":\[\{"text":"@([^"]+)"\}', ch_resp.text)
+                    if handle_match:
+                        print(f"  YouTube search found handle via channel: @{handle_match.group(1)}")
+                        return handle_match.group(1)
+    except Exception as e:
+        print(f"  YouTube search failed: {e}")
+
+    return None
+
+
 async def scrape_youtube_channel(handle: str) -> YouTubeData | None:
     """Scrape YouTube channel data including videos, stats, and branding."""
     data = YouTubeData()
@@ -221,7 +256,7 @@ async def scrape_influencer_profile(name: str) -> InfluencerProfile:
     slug_dots = name.lower().replace(" ", ".")
     handles = list(dict.fromkeys([slug, slug_underscore, slug_dots, name.lower()]))
 
-    # Try YouTube with each handle
+    # Try YouTube with each handle variation
     for handle in handles:
         yt = await scrape_youtube_channel(handle)
         if yt and yt.videos:
@@ -232,6 +267,20 @@ async def scrape_influencer_profile(name: str) -> InfluencerProfile:
             profile.profile_image_url = yt.profile_pic_url
             profile.banner_image_url = yt.banner_url
             break
+
+    # If no YouTube found, search YouTube for the name
+    if not profile.youtube:
+        print(f"  Handle variations failed, searching YouTube for '{name}'...")
+        found_handle = await search_youtube_handle(name)
+        if found_handle:
+            yt = await scrape_youtube_channel(found_handle)
+            if yt and yt.videos:
+                profile.youtube = yt
+                profile.handle = yt.handle or f"@{found_handle}"
+                profile.name = yt.channel_name or name
+                profile.bio = yt.description
+                profile.profile_image_url = yt.profile_pic_url
+                profile.banner_image_url = yt.banner_url
 
     # Try Twitter
     for handle in handles:
