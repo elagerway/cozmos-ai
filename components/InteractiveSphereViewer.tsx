@@ -44,88 +44,89 @@ const LEVELS = [
 ]
 
 function ProfileCardHTML(data: ProfileMarkerData): string {
+  // Wall-mounted display panel — sharp, solid, like a kiosk in the room
   return `
     <div style="
-      background: linear-gradient(145deg, rgba(20,20,20,0.92), rgba(10,10,10,0.95));
-      backdrop-filter: blur(24px);
-      border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 20px;
-      padding: 28px;
-      width: 340px;
+      background: linear-gradient(180deg, #0d0d0d 0%, #151515 100%);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-left: 4px solid rgba(59,130,246,0.6);
+      border-radius: 4px;
+      padding: 28px 28px 24px;
+      width: 400px;
       color: white;
       font-family: Inter, system-ui, sans-serif;
       cursor: default;
-      box-shadow: 0 0 40px rgba(0,150,255,0.15), 0 20px 60px rgba(0,0,0,0.6);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.8);
     ">
       <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;">
-        ${data.profile_image ? `<img src="${data.profile_image}" style="width:72px;height:72px;border-radius:50%;border:3px solid rgba(59,130,246,0.5);box-shadow:0 0 20px rgba(59,130,246,0.3);" />` : ""}
+        ${data.profile_image ? `<img src="${data.profile_image}" style="width:80px;height:80px;border-radius:8px;border:2px solid rgba(255,255,255,0.1);object-fit:cover;" />` : ""}
         <div>
-          <div style="font-size:20px;font-weight:800;letter-spacing:-0.02em;">${data.name}</div>
-          <div style="font-size:13px;color:rgba(255,255,255,0.4);margin-top:2px;">${data.handle}</div>
+          <div style="font-size:22px;font-weight:800;letter-spacing:-0.02em;">${data.name}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.35);margin-top:3px;">${data.handle}</div>
         </div>
       </div>
-      ${data.bio ? `<p style="font-size:13px;color:rgba(255,255,255,0.65);line-height:1.6;margin:0 0 16px 0;">${data.bio.slice(0, 160)}${data.bio.length > 160 ? "..." : ""}</p>` : ""}
+      ${data.bio ? `<p style="font-size:13px;color:rgba(255,255,255,0.55);line-height:1.6;margin:0 0 16px 0;">${data.bio.slice(0, 160)}${data.bio.length > 160 ? "..." : ""}</p>` : ""}
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;">
-        ${data.subscriber_count ? `<span style="padding:4px 10px;border-radius:20px;background:rgba(255,0,0,0.15);border:1px solid rgba(255,0,0,0.2);font-size:11px;color:rgba(255,100,100,0.9);">YT ${data.subscriber_count}</span>` : ""}
-        ${(data as any).instagram_handle ? `<span style="padding:4px 10px;border-radius:20px;background:rgba(225,48,108,0.15);border:1px solid rgba(225,48,108,0.2);font-size:11px;color:rgba(225,130,170,0.9);">IG @${(data as any).instagram_handle}</span>` : ""}
-        ${data.twitter_handle ? `<span style="padding:4px 10px;border-radius:20px;background:rgba(29,155,240,0.15);border:1px solid rgba(29,155,240,0.2);font-size:11px;color:rgba(100,180,240,0.9);">X @${data.twitter_handle}</span>` : ""}
-        ${(data as any).tiktok_handle ? `<span style="padding:4px 10px;border-radius:20px;background:rgba(0,242,234,0.1);border:1px solid rgba(0,242,234,0.2);font-size:11px;color:rgba(100,242,234,0.9);">TT @${(data as any).tiktok_handle}</span>` : ""}
+        ${data.subscriber_count ? `<span style="padding:4px 10px;border-radius:3px;background:rgba(255,0,0,0.12);font-size:11px;color:rgba(255,100,100,0.9);">YT ${data.subscriber_count}</span>` : ""}
+        ${(data as any).instagram_handle ? `<span style="padding:4px 10px;border-radius:3px;background:rgba(225,48,108,0.12);font-size:11px;color:rgba(225,130,170,0.9);">IG @${(data as any).instagram_handle}</span>` : ""}
+        ${data.twitter_handle ? `<span style="padding:4px 10px;border-radius:3px;background:rgba(29,155,240,0.12);font-size:11px;color:rgba(100,180,240,0.9);">X @${data.twitter_handle}</span>` : ""}
+        ${(data as any).tiktok_handle ? `<span style="padding:4px 10px;border-radius:3px;background:rgba(0,242,234,0.08);font-size:11px;color:rgba(100,242,234,0.9);">TT @${(data as any).tiktok_handle}</span>` : ""}
       </div>
       ${data.channel_url ? `<a href="${data.channel_url}" target="_blank" rel="noopener" style="
         display:inline-block;padding:10px 24px;
-        background:linear-gradient(135deg, rgba(59,130,246,0.8), rgba(34,211,238,0.8));
-        border-radius:10px;
+        background:#1a1a1a;border:1px solid rgba(255,255,255,0.1);
+        border-radius:4px;
         color:white;font-size:13px;font-weight:600;text-decoration:none;
-        box-shadow:0 4px 15px rgba(59,130,246,0.3);
       ">Visit Channel</a>` : ""}
     </div>
   `
 }
 
 function VideoThumbnailHTML(data: VideoMarkerData): string {
-  // TV screen showing thumbnail with play button — click swaps to iframe
+  // Wall-mounted TV — thick bezel, screen glow, realistic proportions
   return `
     <div data-video-id="${data.video_id}" data-mode="thumbnail" style="
-      background: #0a0a0a;
-      border: 5px solid #1a1a1a;
-      border-radius: 3px;
-      width: 480px;
+      background: #080808;
+      border: 12px solid #111;
+      border-bottom: 18px solid #111;
+      border-radius: 6px;
+      width: 640px;
       overflow: hidden;
       color: white;
       font-family: Inter, system-ui, sans-serif;
       cursor: pointer;
-      box-shadow: 0 0 30px rgba(0,0,0,0.8), 0 0 60px rgba(100,150,255,0.08);
-      transition: transform 0.2s, box-shadow 0.2s;
+      box-shadow: 0 15px 40px rgba(0,0,0,0.9);
     ">
-      <div style="position:relative;">
+      <div style="position:relative;box-shadow:inset 0 0 30px rgba(100,150,255,0.06);">
         <img src="${data.thumbnail_url}" style="width:100%;aspect-ratio:16/9;object-fit:cover;display:block;" />
-        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.2);">
-          <div style="width:56px;height:56px;border-radius:50%;background:rgba(255,0,0,0.85);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(255,0,0,0.4);transition:transform 0.2s;"
-               onmouseenter="this.style.transform='scale(1.1)'" onmouseleave="this.style.transform='scale(1)'">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.15);">
+          <div style="width:72px;height:72px;border-radius:50%;background:rgba(255,0,0,0.85);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 25px rgba(255,0,0,0.5);transition:transform 0.2s;"
+               onmouseenter="this.style.transform='scale(1.15)'" onmouseleave="this.style.transform='scale(1)'">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
           </div>
         </div>
       </div>
-      <div style="padding:8px 10px;background:#111;">
-        <div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${data.title}</div>
-        ${data.view_count ? `<div style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:2px;">${data.view_count}</div>` : ""}
+      <div style="padding:10px 14px;background:#0a0a0a;">
+        <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${data.title}</div>
+        ${data.view_count ? `<div style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:3px;">${data.view_count}</div>` : ""}
       </div>
     </div>
   `
 }
 
 function VideoPlayingHTML(data: VideoMarkerData): string {
-  // TV screen with YouTube iframe playing inside it
+  // TV screen with YouTube iframe — same bezel styling, seamless transition
   return `
     <div data-video-id="${data.video_id}" data-mode="playing" style="
       background: #000;
-      border: 5px solid #1a1a1a;
-      border-radius: 3px;
-      width: 520px;
+      border: 12px solid #111;
+      border-bottom: 18px solid #111;
+      border-radius: 6px;
+      width: 640px;
       overflow: hidden;
       color: white;
       font-family: Inter, system-ui, sans-serif;
-      box-shadow: 0 0 40px rgba(0,0,0,0.9), 0 0 80px rgba(100,150,255,0.15);
+      box-shadow: 0 15px 40px rgba(0,0,0,0.9), 0 0 60px rgba(100,150,255,0.1);
     ">
       <div style="position:relative;width:100%;padding-bottom:56.25%;">
         <iframe
@@ -135,30 +136,30 @@ function VideoPlayingHTML(data: VideoMarkerData): string {
           allowfullscreen
         ></iframe>
       </div>
-      <div style="padding:6px 10px;background:#111;display:flex;justify-content:space-between;align-items:center;">
-        <div style="font-size:10px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;">${data.title}</div>
+      <div style="padding:8px 14px;background:#0a0a0a;display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;">${data.title}</div>
         <button onclick="this.closest('[data-video-id]').setAttribute('data-action','close')" style="
-          margin-left:8px;padding:4px 12px;border-radius:4px;border:1px solid rgba(255,255,255,0.15);
-          background:rgba(255,255,255,0.05);color:rgba(255,255,255,0.6);font-size:10px;cursor:pointer;
-          white-space:nowrap;
-        ">Close</button>
+          margin-left:10px;padding:5px 14px;border-radius:3px;border:1px solid rgba(255,255,255,0.1);
+          background:#1a1a1a;color:rgba(255,255,255,0.5);font-size:11px;cursor:pointer;white-space:nowrap;
+        ">Stop</button>
       </div>
     </div>
   `
 }
 
 function ImageFrameHTML(data: { image_url: string; source: string }): string {
+  // Wall-mounted picture frame — wooden frame, off-white matte, realistic shadow
   return `
     <div style="
-      background: linear-gradient(145deg, #2a2218, #1a1510);
-      padding: 8px;
+      background: linear-gradient(145deg, #3a2e1f, #2a2015, #3a2e1f);
+      padding: 14px;
       border-radius: 2px;
-      box-shadow: 0 8px 30px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.05);
-      width: 180px;
+      box-shadow: 0 8px 25px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,255,255,0.06);
+      width: 300px;
       cursor: default;
     ">
-      <div style="border:2px solid #3a3020;border-radius:1px;overflow:hidden;">
-        <img src="${data.image_url}" style="width:100%;aspect-ratio:1;object-fit:cover;display:block;" />
+      <div style="border:6px solid #f0ebe0;border-radius:1px;overflow:hidden;box-shadow:inset 0 0 10px rgba(0,0,0,0.15);">
+        <img src="${data.image_url}" style="width:100%;aspect-ratio:4/5;object-fit:cover;display:block;" />
       </div>
     </div>
   `
@@ -167,7 +168,6 @@ function ImageFrameHTML(data: { image_url: string; source: string }): string {
 export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, markers = [] }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<any>(null)
-  const markersPluginRef = useRef<any>(null)
   const [loading, setLoading] = useState(true)
   const [ready, setReady] = useState(false)
 
@@ -199,6 +199,11 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
         ? `${tileBaseUrl}/tiles/${stem}`
         : `/spheres/tiles/${stem}`
 
+      // Inject smooth marker transitions
+      const style = document.createElement("style")
+      style.textContent = `.psv-marker--normal { transition: transform 0.15s ease-out, opacity 0.2s; }`
+      containerRef.current.appendChild(style)
+
       const viewer = new Viewer({
         container: containerRef.current,
         adapter: EquirectangularTilesAdapter,
@@ -224,9 +229,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
 
         const markersPlugin = viewer.getPlugin(MarkersPlugin) as any
         if (!markersPlugin) return
-        markersPluginRef.current = markersPlugin
 
-        // Track which videos are playing
         const playingVideos = new Set<string>()
 
         for (let i = 0; i < markers.length; i++) {
@@ -240,6 +243,8 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
               position: { yaw: yawRad, pitch: pitchRad },
               html: ProfileCardHTML(marker.data as ProfileMarkerData),
               anchor: "center center",
+              size: { width: 400, height: 380 },
+              scale: [0.6, 1.3],
               data: { ...marker.data, markerType: "profile" },
             } as any)
           } else if (marker.type === "video") {
@@ -249,6 +254,8 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
               position: { yaw: yawRad, pitch: pitchRad },
               html: VideoThumbnailHTML(vdata),
               anchor: "center center",
+              size: { width: 640, height: 420 },
+              scale: [0.5, 1.5],
               data: { ...vdata, markerType: "video" },
             } as any)
           } else if (marker.type === "image") {
@@ -257,11 +264,13 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
               position: { yaw: yawRad, pitch: pitchRad },
               html: ImageFrameHTML(marker.data as any),
               anchor: "center center",
+              size: { width: 300, height: 420 },
+              scale: [0.5, 1.4],
             } as any)
           }
         }
 
-        // Handle clicks — toggle video play/pause IN the sphere
+        // Handle clicks — toggle video play/stop IN the sphere
         markersPlugin.addEventListener("select-marker", (e: any) => {
           const markerConfig = e.marker?.config || e.marker
           const data = markerConfig?.data
@@ -270,14 +279,14 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
           const markerId = `video-${data.video_id}`
 
           if (playingVideos.has(data.video_id)) {
-            // Stop playing — swap back to thumbnail
+            // Stop — swap back to thumbnail
             playingVideos.delete(data.video_id)
             markersPlugin.updateMarker({
               id: markerId,
               html: VideoThumbnailHTML(data as VideoMarkerData),
             } as any)
           } else {
-            // Start playing — swap to iframe
+            // Play — swap to iframe
             playingVideos.add(data.video_id)
             markersPlugin.updateMarker({
               id: markerId,
@@ -286,14 +295,13 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
           }
         })
 
-        // Listen for close button clicks inside playing videos
+        // Listen for Stop button clicks inside playing videos
         const observer = new MutationObserver(() => {
           document.querySelectorAll("[data-action='close']").forEach((el) => {
             const wrapper = el.closest("[data-video-id]")
             const videoId = wrapper?.getAttribute("data-video-id")
             if (videoId && playingVideos.has(videoId)) {
               playingVideos.delete(videoId)
-              // Find the original marker data
               const origMarker = markers.find(
                 (m) => m.type === "video" && (m.data as VideoMarkerData).video_id === videoId
               )
@@ -316,14 +324,12 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
       destroyed = true
       viewerRef.current?.destroy()
       viewerRef.current = null
-      markersPluginRef.current = null
     }
   }, [imageUrl, tileStem, tileBaseUrl, markers, ready])
 
   return (
     <div className="relative w-full h-[600px] rounded-xl overflow-hidden border border-white/10">
       <div ref={containerRef} className="w-full h-full" />
-
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm z-10">
           <div className="flex flex-col items-center gap-3">
