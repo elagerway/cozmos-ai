@@ -39,6 +39,7 @@ SPHERES_DIR.mkdir(parents=True, exist_ok=True)
 TILES_DIR.mkdir(parents=True, exist_ok=True)
 
 FAL_KEY = os.environ.get("FAL_KEY", "")
+BLOCKADE_API_KEY = os.environ.get("BLOCKADE_API_KEY", "")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 
@@ -669,7 +670,7 @@ async def generate(body: dict):
         if not prompt:
             return JSONResponse({"error": "brand, url, or prompt is required"}, status_code=400)
         # Forward to prompt-based generation
-        return await generate_from_prompt({"prompt": prompt, "method": "direct"})
+        return await generate_from_prompt({"prompt": prompt})
 
     slug = brand or "custom"
     gen_id = f"gen-{slug}-{uuid.uuid4().hex[:8]}"
@@ -691,10 +692,12 @@ async def generate(body: dict):
 async def generate_from_prompt(body: dict):
     """Generate a sphere from a text prompt using AI image generation."""
     prompt = body.get("prompt", "")
-    method = body.get("method", "direct")  # "direct" or "cubemap"
 
     if not prompt:
         return JSONResponse({"error": "prompt is required"}, status_code=400)
+
+    if not BLOCKADE_API_KEY:
+        return JSONResponse({"error": "AI sphere generation not configured"}, status_code=503)
 
     gen_id = f"gen-ai-{uuid.uuid4().hex[:8]}"
     generations[gen_id] = {
@@ -707,7 +710,7 @@ async def generate_from_prompt(body: dict):
         "label": "Starting AI generation...",
     }
 
-    def run_prompt_pipeline(gen_id, prompt, method):
+    def run_prompt_pipeline(gen_id, prompt):
         start = time.time()
         def update(step, pct, label):
             generations[gen_id].update({"step": step, "pct": pct, "label": label})
@@ -715,17 +718,22 @@ async def generate_from_prompt(body: dict):
         try:
             from sphere_gen import generate_sphere_from_prompt
 
-            if method == "cubemap":
-                update("scrape", 5, "Generating 6 cubemap faces...")
-            else:
-                update("scrape", 5, "Generating panorama from prompt...")
+            update("scrape", 5, "Generating 360° environment from prompt...")
+
+            def on_skybox_progress(status):
+                if status == "pending":
+                    update("scrape", 10, "Queued for generation...")
+                elif status == "dispatched":
+                    update("scrape", 20, "AI rendering 360° panorama...")
+                elif status == "processing":
+                    update("upscale", 40, "Processing 8K panorama...")
 
             loop = asyncio.new_event_loop()
             canvas = loop.run_until_complete(
-                generate_sphere_from_prompt(prompt, method)
+                generate_sphere_from_prompt(prompt, on_progress=on_skybox_progress)
             )
             loop.close()
-            update("compose", 70, "Panorama generated")
+            update("compose", 70, "8K panorama generated, upscaling to 16K...")
 
             # Tiles
             def on_tile_progress(done, total):
@@ -757,8 +765,8 @@ async def generate_from_prompt(body: dict):
                 "tile_stem": gen_id,
                 "tile_base_url": tile_base_url,
                 "duration_s": duration,
-                "image_count": 6 if method == "cubemap" else 1,
-                "cost_usd": 0.05 if method == "cubemap" else 0.01,
+                "image_count": 1,
+                "cost_usd": 0.20,
             })
 
             generations[gen_id].update({
@@ -770,7 +778,7 @@ async def generate_from_prompt(body: dict):
                 "tile_stem": gen_id,
                 "tile_base_url": tile_base_url,
                 "duration_s": duration,
-                "image_count": 6 if method == "cubemap" else 1,
+                "image_count": 1,
             })
             print(f"Prompt pipeline complete: {gen_id} in {duration}s")
 
@@ -780,7 +788,7 @@ async def generate_from_prompt(body: dict):
             traceback.print_exc()
             generations[gen_id].update({"status": "failed", "error": str(e)})
 
-    executor.submit(run_prompt_pipeline, gen_id, prompt, method)
+    executor.submit(run_prompt_pipeline, gen_id, prompt)
     return {"id": gen_id}
 
 
