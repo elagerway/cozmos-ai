@@ -49,7 +49,7 @@ export default function HomePage() {
       ? EXAMPLES.filter((e) => new Set(JSON.parse(stored) as string[]).has(e.id))
       : EXAMPLES.filter((e) => e.featured)
 
-    // Also load recent generations from Supabase
+    // Load generated spheres from Supabase (these work everywhere)
     fetchGenerations().then((rows) => {
       const generated: Example[] = rows.slice(0, 6).map((r: GenerationRow) => ({
         id: r.id,
@@ -70,8 +70,12 @@ export default function HomePage() {
         tile_stem: r.tile_stem,
         tile_base_url: r.tile_base_url,
       }))
-      const seen = new Set(hardcoded.map((e) => e.id))
-      setFeaturedExamples([...hardcoded, ...generated.filter((g) => !seen.has(g.id))])
+      // Only show hardcoded examples if tiles exist locally (dev), otherwise just Supabase
+      if (generated.length > 0) {
+        setFeaturedExamples(generated)
+      } else {
+        setFeaturedExamples(hardcoded)
+      }
     })
   }, [])
 
