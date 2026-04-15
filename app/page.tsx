@@ -290,6 +290,77 @@ export default function HomePage() {
     }
   }
 
+  const SUPABASE_CDN = process.env.NEXT_PUBLIC_SUPABASE_URL
+    ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/spheres`
+    : ""
+
+  function handleSampleSphere(stem: string, label: string) {
+    setSubmittedPrompt(`Pre-built 16K sphere: ${label}`)
+    setDetectedProfile(null)
+    setGenerating(true)
+    setDone(false)
+    setImageUrl(null)
+    setTileStem(null)
+    setTileBaseUrl(null)
+    setLowResWarning(false)
+    setSpec(null)
+    setBgPrompt(null)
+    setStep("scan_profile")
+    setPct(0)
+    setLabel("Loading high-res environment...")
+
+    setTimeout(() => {
+      resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    }, 100)
+
+    cleanupRef.current?.()
+
+    // Simulate progress steps with realistic timing
+    const steps: { step: PipelineStep; pct: number; label: string; delay: number }[] = [
+      { step: "scan_profile", pct: 5, label: "Loading environment data...", delay: 0 },
+      { step: "scan_profile", pct: 10, label: "Found high-res source (16K)", delay: 400 },
+      { step: "extract_style", pct: 25, label: "Analyzing environment lighting...", delay: 800 },
+      { step: "extract_style", pct: 45, label: "Extracting color palette...", delay: 1200 },
+      { step: "bg_prompt", pct: 65, label: "Preparing panoramic projection...", delay: 1600 },
+      { step: "bg_prompt", pct: 75, label: "Mapping equirectangular tiles...", delay: 2000 },
+      { step: "process", pct: 85, label: "Loading tile pyramid (170 tiles)...", delay: 2400 },
+      { step: "process", pct: 95, label: "Finalizing sphere...", delay: 2800 },
+    ]
+
+    const timers: ReturnType<typeof setTimeout>[] = []
+
+    for (const s of steps) {
+      timers.push(setTimeout(() => {
+        setStep(s.step)
+        setPct(s.pct)
+        setLabel(s.label)
+      }, s.delay))
+    }
+
+    // Reveal the sphere — use Supabase CDN on production, local files on dev
+    timers.push(setTimeout(() => {
+      setStep("done")
+      setPct(100)
+      setLabel("Your sphere is ready")
+      const isLocal = window.location.hostname === "localhost"
+      if (isLocal) {
+        setImageUrl(`/spheres/${stem}.jpg`)
+        setTileStem(stem)
+        setTileBaseUrl(null)
+      } else {
+        setImageUrl(`${SUPABASE_CDN}/${stem}.jpg`)
+        setTileStem(stem)
+        setTileBaseUrl(SUPABASE_CDN)
+      }
+      setSpec(null)
+      setBgPrompt(`Pre-built 16K equirectangular environment from Polyhaven. 4-level progressive tile loading for razor-sharp detail at any zoom level.`)
+      setDone(true)
+      setGenerating(false)
+    }, 3200))
+
+    cleanupRef.current = () => timers.forEach(clearTimeout)
+  }
+
   // Mix social and standard sample briefs
   const allSampleBriefs = [...SOCIAL_SAMPLE_BRIEFS.slice(0, 3), ...SAMPLE_BRIEFS.slice(0, 2)]
 
@@ -397,24 +468,25 @@ export default function HomePage() {
             </p>
             <div className="flex flex-wrap gap-2">
               {[
-                { id: "sample-bell-tower", label: "Bell Tower" },
-                { id: "sample-venice-sunset", label: "Venice Sunset" },
-                { id: "sample-rogland-night", label: "Clear Night Sky" },
-                { id: "sample-monkstown-castle", label: "Castle" },
-                { id: "sample-red-wall", label: "Red Wall" },
-                { id: "sample-peppermint-powerplant", label: "Powerplant" },
-                { id: "sample-gym", label: "Gym" },
-                { id: "sample-outdoor-storm", label: "Storm Sky" },
-                { id: "sample-cozy-cafe", label: "Cozy Cafe" },
-                { id: "sample-luxury-ballroom", label: "Ballroom" },
+                { stem: "env-bell-tower", label: "Bell Tower" },
+                { stem: "env-venice-sunset", label: "Venice Sunset" },
+                { stem: "env-rogland-night", label: "Clear Night Sky" },
+                { stem: "env-monkstown-castle", label: "Castle" },
+                { stem: "env-red-wall", label: "Red Wall" },
+                { stem: "env-peppermint-powerplant", label: "Powerplant" },
+                { stem: "env-gym", label: "Gym" },
+                { stem: "env-outdoor-storm", label: "Storm Sky" },
+                { stem: "env-cozy-cafe", label: "Cozy Cafe" },
+                { stem: "env-luxury-ballroom", label: "Ballroom" },
               ].map((s) => (
-                <Link
-                  key={s.id}
-                  href={`/g/${s.id}`}
-                  className="px-3 py-1.5 text-xs rounded-full border border-white/10 bg-transparent text-muted-foreground hover:text-foreground hover:border-white/20 hover:bg-white/5 transition-all"
+                <button
+                  key={s.stem}
+                  disabled={generating}
+                  onClick={() => handleSampleSphere(s.stem, s.label)}
+                  className="px-3 py-1.5 text-xs rounded-full border border-white/10 bg-transparent text-muted-foreground hover:text-foreground hover:border-white/20 hover:bg-white/5 transition-all disabled:opacity-50"
                 >
                   {s.label}
-                </Link>
+                </button>
               ))}
             </div>
           </div>
