@@ -28,6 +28,15 @@ class InstagramData:
 
 
 @dataclass
+class TikTokData:
+    handle: str = ""
+    name: str = ""
+    bio: str = ""
+    profile_pic_url: str = ""
+    follower_count: str = ""
+
+
+@dataclass
 class VideoData:
     id: str
     title: str
@@ -70,6 +79,7 @@ class InfluencerProfile:
     youtube: YouTubeData | None = None
     twitter: TwitterData | None = None
     instagram: InstagramData | None = None
+    tiktok: TikTokData | None = None
     website_url: str = ""
     thumbnail_images: list[bytes] = field(default_factory=list)
 
@@ -294,6 +304,53 @@ async def scrape_twitter_profile(handle: str) -> TwitterData | None:
     return None
 
 
+async def scrape_tiktok_profile(handle: str) -> TikTokData | None:
+    """Scrape basic TikTok profile data from meta tags."""
+    data = TikTokData(handle=handle)
+
+    try:
+        async with httpx.AsyncClient(
+            follow_redirects=True, timeout=10.0,
+            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
+        ) as client:
+            resp = await client.get(f"https://www.tiktok.com/@{handle}")
+            if resp.status_code != 200:
+                return None
+            html = resp.text
+
+            # Extract from meta tags
+            desc_match = re.search(r'<meta\s+(?:name|property)="(?:og:)?description"\s+content="([^"]+)"', html)
+            if desc_match:
+                data.bio = desc_match.group(1)
+
+            title_match = re.search(r'<meta\s+(?:name|property)="(?:og:)?title"\s+content="([^"]+)"', html)
+            if title_match:
+                data.name = title_match.group(1).split("(")[0].split("|")[0].strip()
+
+            img_match = re.search(r'<meta\s+(?:name|property)="(?:og:)?image"\s+content="([^"]+)"', html)
+            if img_match:
+                data.profile_pic_url = img_match.group(1)
+
+            # Try to extract follower count from JSON-LD or page data
+            followers_match = re.search(r'"followerCount"[:\s]*(\d+)', html)
+            if followers_match:
+                count = int(followers_match.group(1))
+                if count >= 1000000:
+                    data.follower_count = f"{count / 1000000:.1f}M"
+                elif count >= 1000:
+                    data.follower_count = f"{count / 1000:.1f}K"
+                else:
+                    data.follower_count = str(count)
+
+            if data.bio or data.name:
+                print(f"  TikTok: {data.name} (@{handle}), {data.follower_count} followers")
+                return data
+    except Exception:
+        pass
+
+    return None
+
+
 async def scrape_instagram_profile(handle: str) -> InstagramData | None:
     """Scrape Instagram profile and recent post images via instagrapi."""
     if not INSTAGRAM_USERNAME or not INSTAGRAM_PASSWORD:
@@ -431,6 +488,17 @@ async def scrape_influencer_profile(name: str) -> InfluencerProfile:
                 profile.profile_image_url = tw.profile_pic_url
             break
 
+    # Try TikTok
+    for handle in handles:
+        tt = await scrape_tiktok_profile(handle)
+        if tt and (tt.bio or tt.name):
+            profile.tiktok = tt
+            if not profile.bio and tt.bio:
+                profile.bio = tt.bio
+            if not profile.name and tt.name:
+                profile.name = tt.name
+            break
+
     # Download thumbnails for compositing (YouTube + Instagram)
     if profile.youtube and profile.youtube.videos:
         profile.thumbnail_images = await download_thumbnails(profile.youtube.videos)
@@ -531,6 +599,8 @@ def build_markers(profile: InfluencerProfile) -> list[dict]:
             "twitter_handle": profile.twitter.handle if profile.twitter else "",
             "instagram_handle": profile.instagram.handle if profile.instagram else "",
             "instagram_followers": profile.instagram.follower_count if profile.instagram else 0,
+            "tiktok_handle": profile.tiktok.handle if profile.tiktok else "",
+            "tiktok_followers": profile.tiktok.follower_count if profile.tiktok else "",
             "channel_url": profile.youtube.channel_url if profile.youtube else "",
         },
     })
