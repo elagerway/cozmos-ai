@@ -446,7 +446,6 @@ export default function HomePage() {
                 { stem: "env-red-wall", label: "Red Wall" },
                 { stem: "env-peppermint-powerplant", label: "Powerplant" },
                 { stem: "env-gym", label: "Gym" },
-                { stem: "env-outdoor-storm", label: "Storm Sky" },
                 { stem: "env-cozy-cafe", label: "Cozy Cafe" },
                 { stem: "env-luxury-ballroom", label: "Ballroom" },
               ].map((s) => (
