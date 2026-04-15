@@ -286,8 +286,11 @@ async def scrape_images_from_url(url: str) -> list[bytes]:
 
 
 async def scrape_brand_images(brand: str) -> list[bytes]:
-    """Scrape product images from a brand's website."""
-    urls_to_try = {
+    """Scrape product images from a brand's website or social profiles.
+
+    Tries multiple sources: known URLs, brand.com, social platforms.
+    """
+    known_urls = {
         "nike": "https://www.nike.com",
         "starbucks": "https://www.starbucks.com",
         "apple": "https://www.apple.com",
@@ -295,14 +298,38 @@ async def scrape_brand_images(brand: str) -> list[bytes]:
         "redbull": "https://www.redbull.com",
     }
 
-    base_url = urls_to_try.get(brand, f"https://www.{brand}.com")
-    images = await scrape_images_from_url(base_url)
+    # Try known URL first
+    if brand in known_urls:
+        images = await scrape_images_from_url(known_urls[brand])
+        if images:
+            return images
 
-    # For Nike, request higher-res CDN images if we got few results
-    if not images and brand == "nike":
-        images = await scrape_images_from_url("https://www.nike.com/w/mens-shoes-nik1zy7ok")
+    # Try www.brand.com
+    images = await scrape_images_from_url(f"https://www.{brand}.com")
+    if images:
+        return images
 
-    return images
+    # Try brand.com without www
+    images = await scrape_images_from_url(f"https://{brand}.com")
+    if images:
+        return images
+
+    # Try social platforms — scrape their public profile pages
+    social_urls = [
+        f"https://www.instagram.com/{brand}/",
+        f"https://x.com/{brand}",
+        f"https://www.youtube.com/@{brand}",
+        f"https://www.tiktok.com/@{brand}",
+        f"https://www.linkedin.com/in/{brand}/",
+    ]
+
+    for social_url in social_urls:
+        print(f"  Trying {social_url}...")
+        images = await scrape_images_from_url(social_url)
+        if images:
+            return images
+
+    return []
 
 
 async def upscale_image_fal(img_bytes: bytes) -> bytes:
@@ -786,18 +813,63 @@ def run_pipeline(gen_id: str, brand: str, source_url: str = ""):
         generations[gen_id].update({"status": "failed", "error": str(e)})
 
 
+def extract_brand_from_prompt(prompt: str) -> tuple[str, str]:
+    """Try to extract a brand/person name and potential URL from a natural language prompt.
+
+    Returns (brand_slug, source_url) — either or both may be empty.
+    """
+    import re
+    prompt_lower = prompt.lower()
+
+    # Check for URLs in the prompt
+    url_match = re.search(r'https?://[^\s]+', prompt)
+    if url_match:
+        return "", url_match.group(0)
+
+    # Check for @handle
+    handle_match = re.search(r'@(\w+)', prompt)
+    if handle_match:
+        return handle_match.group(1).lower(), ""
+
+    # Common patterns: "based on X's socials", "inspired by X", "from X", "for X"
+    patterns = [
+        r"(?:based on|inspired by|from|for|of|showcase for|sphere for|about)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*?)(?:'s|\s+socials|\s+social|\s+brand|\s+style|\s+aesthetic|\s+content|\s+page|\s+profile|\s+website|\s+site|$|\s*[,.])",
+        r"(?:based on|inspired by|from|for|of)\s+(\w+(?:\s+\w+)?)\s*$",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, prompt, re.IGNORECASE)
+        if match:
+            name = match.group(1).strip().rstrip("'s").strip()
+            if len(name) > 2 and name.lower() not in ("a", "an", "the", "my", "our", "your", "this", "that"):
+                # Convert name to slug for URL guessing
+                slug = name.lower().replace(" ", "")
+                return slug, ""
+
+    return "", ""
+
+
 @app.post("/generate")
 async def generate(body: dict):
-    """Start sphere generation from a brand handle or URL."""
+    """Start sphere generation from a brand handle, URL, or natural language prompt."""
     brand = body.get("brand", "").strip().lower().replace("@", "")
     prompt = body.get("prompt", "")
     source_url = body.get("url", "").strip()
 
-    # If no brand or URL, try AI generation from the prompt
+    # If no explicit brand or URL, try to extract from the prompt
+    if not brand and not source_url and prompt:
+        extracted_brand, extracted_url = extract_brand_from_prompt(prompt)
+        if extracted_brand:
+            brand = extracted_brand
+            print(f"  Extracted brand from prompt: '{brand}'")
+        elif extracted_url:
+            source_url = extracted_url
+            print(f"  Extracted URL from prompt: '{source_url}'")
+
+    # If still nothing to scrape, use pure AI generation
     if not brand and not source_url:
         if not prompt:
             return JSONResponse({"error": "brand, url, or prompt is required"}, status_code=400)
-        # Forward to prompt-based generation
         return await generate_from_prompt({"prompt": prompt})
 
     slug = brand or "custom"
