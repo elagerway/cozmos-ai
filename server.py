@@ -471,6 +471,7 @@ def run_pipeline(gen_id: str, brand: str, source_url: str = ""):
             "step_label": "Your sphere is ready",
             "image_url": image_url,
             "tile_stem": gen_id,
+            "tile_base_url": tile_base_url,
             "duration_s": duration,
             "image_count": len(upscaled),
             "cost_usd": round(len(upscaled) * 0.003, 4),
