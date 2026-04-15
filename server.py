@@ -947,12 +947,185 @@ def extract_brand_from_prompt(prompt: str) -> tuple[str, str]:
     return "", ""
 
 
+@app.post("/generate-about-me")
+async def generate_about_me(body: dict):
+    """Generate an interactive About Me sphere for an influencer."""
+    name = body.get("name", "").strip()
+    prompt = body.get("prompt", "")
+
+    if not name:
+        return JSONResponse({"error": "name is required"}, status_code=400)
+
+    if not BLOCKADE_API_KEY:
+        return JSONResponse({"error": "AI sphere generation not configured"}, status_code=503)
+
+    gen_id = f"gen-aboutme-{uuid.uuid4().hex[:8]}"
+    generations[gen_id] = {
+        "id": gen_id,
+        "brand": name.lower().replace(" ", ""),
+        "prompt": prompt or f"About Me sphere for {name}",
+        "status": "running",
+        "step": "init",
+        "pct": 0,
+        "label": "Starting...",
+    }
+
+    def run_about_me_pipeline(gen_id, name):
+        start = time.time()
+        def update(step, pct, label):
+            generations[gen_id].update({"step": step, "pct": pct, "label": label})
+
+        try:
+            from profile_scraper import scrape_influencer_profile, build_about_me_prompt, build_markers
+            from sphere_gen import generate_sphere_from_prompt
+
+            # Step 1: Scrape profile
+            update("scrape", 3, f"Discovering {name}'s digital presence...")
+            loop = asyncio.new_event_loop()
+            profile = loop.run_until_complete(scrape_influencer_profile(name))
+            update("scrape", 10, f"Found {len(profile.youtube.videos) if profile.youtube else 0} videos")
+
+            if not profile.youtube and not profile.twitter:
+                generations[gen_id].update({"status": "failed", "error": f"Could not find profile data for {name}"})
+                loop.close()
+                return
+
+            # Step 2: Generate branded environment
+            blockade_prompt = build_about_me_prompt(profile)
+            update("upscale", 15, f"Generating {name}'s personalized environment...")
+
+            def on_env_progress(status):
+                if status == "pending":
+                    update("upscale", 18, "Queued for environment generation...")
+                elif status == "dispatched":
+                    update("upscale", 22, "AI rendering personalized studio...")
+                elif status == "processing":
+                    update("upscale", 35, "Rendering 360° environment...")
+                elif status == "exporting_16k":
+                    update("upscale", 48, "Exporting 16K environment...")
+                elif status.startswith("export_"):
+                    update("compose", 52, "Processing 16K export...")
+
+            environment = loop.run_until_complete(
+                generate_sphere_from_prompt(blockade_prompt, on_progress=on_env_progress)
+            )
+            update("compose", 55, "Environment ready")
+
+            # Step 3: Upscale thumbnails and composite
+            if profile.thumbnail_images:
+                update("compose", 58, f"Enhancing {len(profile.thumbnail_images)} thumbnails...")
+
+                def on_up_progress(done, total):
+                    pct = 58 + int(7 * (done / total))
+                    update("compose", pct, f"Enhancing image {done}/{total}...")
+
+                upscaled = loop.run_until_complete(
+                    upscale_all_parallel(profile.thumbnail_images, on_progress=on_up_progress)
+                )
+                update("compose", 66, "Compositing content onto environment...")
+                canvas = compose_on_environment(upscaled, environment)
+            else:
+                canvas = environment
+
+            loop.close()
+            update("compose", 70, "Sphere composed")
+
+            # Step 4: Tiles
+            def on_tile_progress(done, total):
+                pct = 72 + int(23 * (done / total))
+                update("tiles", pct, f"Generating tiles ({done}/{total})...")
+
+            update("tiles", 72, "Generating tile pyramid...")
+            generate_tiles(canvas, gen_id, on_progress=on_tile_progress)
+            update("tiles", 95, "Tiles generated")
+
+            # Step 5: Build markers
+            markers = build_markers(profile)
+
+            # Step 6: Save
+            update("save", 96, "Saving to cloud...")
+            duration = int(time.time() - start)
+
+            if SUPABASE_URL:
+                tile_base_url = f"{SUPABASE_URL}/storage/v1/object/public/spheres"
+                image_url = f"{tile_base_url}/{gen_id}.jpg"
+            else:
+                tile_base_url = ""
+                image_url = f"/spheres/{gen_id}.jpg"
+
+            # Save with markers and profile data
+            import json as json_mod
+            save_generation_record(gen_id, {
+                "brand": name.lower().replace(" ", ""),
+                "prompt": generations[gen_id].get("prompt", ""),
+                "status": "done",
+                "step": "done",
+                "step_label": "Your sphere is ready",
+                "image_url": image_url,
+                "tile_stem": gen_id,
+                "tile_base_url": tile_base_url,
+                "duration_s": duration,
+                "image_count": len(profile.thumbnail_images),
+                "cost_usd": 0.25,
+            })
+
+            # Save markers separately via direct Supabase update
+            if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+                import requests
+                requests.patch(
+                    f"{SUPABASE_URL}/rest/v1/generations?id=eq.{gen_id}",
+                    headers={
+                        "apikey": SUPABASE_SERVICE_KEY,
+                        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                        "Content-Type": "application/json",
+                        "Prefer": "return=minimal",
+                    },
+                    json={"environment": json_mod.dumps({"markers": markers, "profile": {
+                        "name": profile.name,
+                        "handle": profile.handle,
+                        "bio": profile.bio,
+                        "profile_image": profile.profile_image_url,
+                    }})},
+                )
+
+            generations[gen_id].update({
+                "status": "done",
+                "step": "done",
+                "pct": 100,
+                "label": "Your sphere is ready",
+                "image_url": image_url,
+                "tile_stem": gen_id,
+                "tile_base_url": tile_base_url,
+                "duration_s": duration,
+                "image_count": len(profile.thumbnail_images),
+                "markers": markers,
+            })
+            print(f"About Me pipeline complete: {gen_id} for {name} in {duration}s")
+
+        except Exception as e:
+            print(f"About Me pipeline error: {e}")
+            import traceback
+            traceback.print_exc()
+            generations[gen_id].update({"status": "failed", "error": str(e)})
+
+    executor.submit(run_about_me_pipeline, gen_id, name)
+    return {"id": gen_id}
+
+
 @app.post("/generate")
 async def generate(body: dict):
     """Start sphere generation from a brand handle, URL, or natural language prompt."""
     brand = body.get("brand", "").strip().lower().replace("@", "")
     prompt = body.get("prompt", "")
     source_url = body.get("url", "").strip()
+
+    # Detect "about me" intent — route to about-me pipeline
+    prompt_lower = prompt.lower()
+    if any(phrase in prompt_lower for phrase in ["about me", "bio sphere", "influencer showcase", "creator showcase", "link in bio"]):
+        # Extract the name
+        extracted_brand, _ = extract_brand_from_prompt(prompt)
+        if extracted_brand or brand:
+            return await generate_about_me({"name": extracted_brand or brand, "prompt": prompt})
 
     # If no explicit brand or URL, try to extract from the prompt
     if not brand and not source_url and prompt:
