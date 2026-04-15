@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { EXAMPLES, Example } from "@/lib/dummy-data"
-import { fetchGenerations, GenerationRow } from "@/lib/supabase"
+import { fetchGenerations, deleteGeneration, GenerationRow } from "@/lib/supabase"
 
 export default function ExamplesPage() {
   const [allExamples, setAllExamples] = useState<Example[]>(EXAMPLES)
@@ -51,6 +51,14 @@ export default function ExamplesPage() {
       setFeaturedIds(new Set(EXAMPLES.filter((e) => e.featured).map((e) => e.id)))
     }
   }, [])
+
+  async function handleDelete(id: string) {
+    if (!confirm("Delete this sphere?")) return
+    const ok = await deleteGeneration(id)
+    if (ok) {
+      setAllExamples((prev) => prev.filter((e) => e.id !== id))
+    }
+  }
 
   function toggleFeatured(id: string) {
     setFeaturedIds((prev) => {
@@ -136,30 +144,42 @@ export default function ExamplesPage() {
                       </p>
                     </div>
 
-                    {/* Featured toggle */}
-                    <button
-                      onClick={() => toggleFeatured(example.id)}
-                      className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
-                        isFeatured
-                          ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-                          : "bg-white/5 text-muted-foreground border border-white/10 hover:text-foreground"
-                      }`}
-                      title={isFeatured ? "Remove from homepage" : "Add to homepage"}
-                    >
-                      <svg
-                        className="w-4 h-4"
-                        fill={isFeatured ? "currentColor" : "none"}
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
+                    <div className="flex gap-1.5 flex-shrink-0">
+                      {/* Featured toggle */}
+                      <button
+                        onClick={() => toggleFeatured(example.id)}
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+                          isFeatured
+                            ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                            : "bg-white/5 text-muted-foreground border border-white/10 hover:text-foreground"
+                        }`}
+                        title={isFeatured ? "Remove from homepage" : "Add to homepage"}
                       >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z"
-                        />
-                      </svg>
-                    </button>
+                        <svg
+                          className="w-4 h-4"
+                          fill={isFeatured ? "currentColor" : "none"}
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z"
+                          />
+                        </svg>
+                      </button>
+                      {/* Delete */}
+                      <button
+                        onClick={() => handleDelete(example.id)}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center bg-white/5 text-muted-foreground border border-white/10 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10 transition-all"
+                        title="Delete sphere"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-2 mt-3">

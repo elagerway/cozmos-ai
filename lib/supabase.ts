@@ -27,6 +27,19 @@ export interface GenerationRow {
   updated_at: string
 }
 
+export async function deleteGeneration(id: string): Promise<boolean> {
+  if (!supabase) return false
+  const { error } = await supabase
+    .from("generations")
+    .delete()
+    .eq("id", id)
+  if (error) {
+    console.error("Failed to delete generation:", error)
+    return false
+  }
+  return true
+}
+
 export async function fetchGenerations(): Promise<GenerationRow[]> {
   if (!supabase) return []
   const { data, error } = await supabase
