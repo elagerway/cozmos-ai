@@ -20,6 +20,7 @@ import { SOCIAL_SAMPLE_BRIEFS, detectSocialProfile, SocialProfile } from "@/lib/
 import { simulatePipeline } from "@/lib/simulate-pipeline"
 import { startGeneration, pollStatus, checkPipelineHealth } from "@/lib/pipeline-client"
 import { PipelineStep, SphereSpec } from "@/lib/types"
+import { fetchGenerations, GenerationRow } from "@/lib/supabase"
 
 export default function HomePage() {
   const [prompt, setPrompt] = useState("")
@@ -42,13 +43,36 @@ export default function HomePage() {
   // Featured examples from localStorage
   const [featuredExamples, setFeaturedExamples] = useState<Example[]>([])
   useEffect(() => {
+    // Load hardcoded featured examples
     const stored = localStorage.getItem("cozmos-featured")
-    if (stored) {
-      const ids = new Set(JSON.parse(stored) as string[])
-      setFeaturedExamples(EXAMPLES.filter((e) => ids.has(e.id)))
-    } else {
-      setFeaturedExamples(EXAMPLES.filter((e) => e.featured))
-    }
+    const hardcoded = stored
+      ? EXAMPLES.filter((e) => new Set(JSON.parse(stored) as string[]).has(e.id))
+      : EXAMPLES.filter((e) => e.featured)
+
+    // Also load recent generations from Supabase
+    fetchGenerations().then((rows) => {
+      const generated: Example[] = rows.slice(0, 6).map((r: GenerationRow) => ({
+        id: r.id,
+        prompt: r.prompt,
+        status: "done" as const,
+        step: "done" as const,
+        step_label: r.step_label,
+        sphere_spec: null,
+        bg_prompt: null,
+        image_url: r.image_url,
+        error: null,
+        cost_usd: r.cost_usd ? Number(r.cost_usd) : null,
+        duration_s: r.duration_s,
+        created_at: r.created_at,
+        featured: false,
+        environment: "pipeline",
+        brand: r.brand || undefined,
+        tile_stem: r.tile_stem,
+        tile_base_url: r.tile_base_url,
+      }))
+      const seen = new Set(hardcoded.map((e) => e.id))
+      setFeaturedExamples([...hardcoded, ...generated.filter((g) => !seen.has(g.id))])
+    })
   }, [])
 
   // Live detection of social profiles as user types
@@ -404,7 +428,7 @@ export default function HomePage() {
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
                   <div className="absolute bottom-3 left-3 right-3">
                     <p className="text-sm font-medium text-white">
-                      {gen.sphere_spec?.campaign_name}
+                      {gen.sphere_spec?.campaign_name || gen.prompt.slice(0, 50)}
                     </p>
                     <p className="text-xs text-white/60 mt-0.5">
                       ${gen.cost_usd?.toFixed(3)} &middot; {gen.duration_s}s

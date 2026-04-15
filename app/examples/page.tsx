@@ -4,10 +4,41 @@ import { useState, useEffect } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { EXAMPLES, Example } from "@/lib/dummy-data"
+import { fetchGenerations, GenerationRow } from "@/lib/supabase"
 
 export default function ExamplesPage() {
+  const [allExamples, setAllExamples] = useState<Example[]>(EXAMPLES)
   // Track featured state locally (persisted in localStorage)
   const [featuredIds, setFeaturedIds] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    // Load generated spheres from Supabase and merge with hardcoded examples
+    fetchGenerations().then((rows) => {
+      const generated: Example[] = rows.map((r: GenerationRow) => ({
+        id: r.id,
+        prompt: r.prompt,
+        status: "done" as const,
+        step: "done" as const,
+        step_label: r.step_label,
+        sphere_spec: null,
+        bg_prompt: null,
+        image_url: r.image_url,
+        error: null,
+        cost_usd: r.cost_usd ? Number(r.cost_usd) : null,
+        duration_s: r.duration_s,
+        created_at: r.created_at,
+        featured: false,
+        environment: "pipeline",
+        brand: r.brand || undefined,
+        tile_stem: r.tile_stem,
+        tile_base_url: r.tile_base_url,
+      }))
+      // Merge: hardcoded first, then generated (dedup by id)
+      const seen = new Set(EXAMPLES.map((e) => e.id))
+      const merged = [...EXAMPLES, ...generated.filter((g) => !seen.has(g.id))]
+      setAllExamples(merged)
+    })
+  }, [])
 
   useEffect(() => {
     const stored = localStorage.getItem("cozmos-featured")
@@ -64,7 +95,7 @@ export default function ExamplesPage() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {EXAMPLES.map((example) => {
+          {allExamples.map((example) => {
             const isFeatured = featuredIds.has(example.id)
             return (
               <div
@@ -96,7 +127,7 @@ export default function ExamplesPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <h3 className="font-semibold text-sm truncate">
-                        {example.sphere_spec?.campaign_name}
+                        {example.sphere_spec?.campaign_name || example.prompt.slice(0, 50)}
                       </h3>
                       <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
                         {example.prompt}

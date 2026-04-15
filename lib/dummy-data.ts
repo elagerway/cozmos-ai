@@ -4,6 +4,8 @@ export interface Example extends Generation {
   featured: boolean
   environment: string
   brand?: string
+  tile_stem?: string | null
+  tile_base_url?: string | null
 }
 
 export const EXAMPLES: Example[] = [

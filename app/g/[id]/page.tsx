@@ -1,10 +1,22 @@
 "use client"
 
-import { use } from "react"
+import { use, useEffect, useState } from "react"
 import Link from "next/link"
 import { SphereViewer } from "@/components/SphereViewer"
 import { SphereSpecViewer } from "@/components/SphereSpecViewer"
 import { getGeneration } from "@/lib/dummy-data"
+import { supabase, GenerationRow } from "@/lib/supabase"
+
+interface ViewData {
+  prompt: string
+  title: string | null
+  image_url: string | null
+  tile_stem: string | null
+  tile_base_url: string | null
+  sphere_spec: any
+  bg_prompt: string | null
+  brand: string | null
+}
 
 export default function PublicSharePage({
   params,
@@ -12,9 +24,70 @@ export default function PublicSharePage({
   params: Promise<{ id: string }>
 }) {
   const { id } = use(params)
-  const gen = getGeneration(id)
+  const [viewData, setViewData] = useState<ViewData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [notFound, setNotFound] = useState(false)
 
-  if (!gen) {
+  useEffect(() => {
+    // Check hardcoded examples first
+    const gen = getGeneration(id)
+    if (gen) {
+      setViewData({
+        prompt: gen.prompt,
+        title: gen.sphere_spec?.campaign_name || null,
+        image_url: gen.image_url,
+        tile_stem: (gen as any).tile_stem || null,
+        tile_base_url: (gen as any).tile_base_url || null,
+        sphere_spec: gen.sphere_spec,
+        bg_prompt: gen.bg_prompt,
+        brand: (gen as any).brand || null,
+      })
+      setLoading(false)
+      return
+    }
+
+    // Check Supabase
+    if (!supabase) {
+      setNotFound(true)
+      setLoading(false)
+      return
+    }
+
+    supabase
+      .from("generations")
+      .select("*")
+      .eq("id", id)
+      .eq("status", "done")
+      .single()
+      .then(({ data, error }) => {
+        if (error || !data) {
+          setNotFound(true)
+        } else {
+          const row = data as GenerationRow
+          setViewData({
+            prompt: row.prompt,
+            title: row.brand ? `${row.brand} — Generated Sphere` : "Generated Sphere",
+            image_url: row.image_url,
+            tile_stem: row.tile_stem,
+            tile_base_url: row.tile_base_url,
+            sphere_spec: null,
+            bg_prompt: null,
+            brand: row.brand,
+          })
+        }
+        setLoading(false)
+      })
+  }, [id])
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  if (notFound || !viewData) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center space-y-4">
@@ -50,22 +123,24 @@ export default function PublicSharePage({
 
       {/* Content */}
       <div className="flex-1 max-w-5xl mx-auto px-6 py-8 w-full">
-        {/* Campaign name */}
-        {gen.sphere_spec && (
+        {viewData.title && (
           <h1 className="text-2xl font-bold mb-2">
-            {gen.sphere_spec.campaign_name}
+            {viewData.title}
           </h1>
         )}
-        <p className="text-muted-foreground mb-6">{gen.prompt}</p>
+        <p className="text-muted-foreground mb-6">{viewData.prompt}</p>
 
-        {/* Sphere */}
-        {gen.image_url && <SphereViewer imageUrl={gen.image_url} />}
+        {viewData.image_url && (
+          <SphereViewer
+            imageUrl={viewData.image_url}
+            tileStem={viewData.tile_stem}
+            tileBaseUrl={viewData.tile_base_url}
+          />
+        )}
 
-
-        {/* Spec */}
-        {gen.sphere_spec && gen.bg_prompt && (
+        {viewData.sphere_spec && viewData.bg_prompt && (
           <div className="mt-6">
-            <SphereSpecViewer spec={gen.sphere_spec} bgPrompt={gen.bg_prompt} />
+            <SphereSpecViewer spec={viewData.sphere_spec} bgPrompt={viewData.bg_prompt} />
           </div>
         )}
       </div>
