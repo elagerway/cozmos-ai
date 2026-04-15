@@ -69,10 +69,41 @@ generations: dict[str, dict] = {}
 executor = ThreadPoolExecutor(max_workers=2)
 
 
+async def screenshot_website(url: str) -> list[bytes]:
+    """Capture screenshots of a website at different scroll positions."""
+    from urllib.parse import quote_plus
+    images = []
+    # Use free screenshot API to capture different viewport sections
+    api_base = "https://api.screenshotone.com/take"
+    # Free tier: use simple approach with different viewports
+    # Fall back to a simpler API
+    widths = [1280]
+    scroll_positions = [0, 800, 1600, 2400, 3200, 4000, 4800, 5600, 6400, 7200, 8000, 8800]
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        for scroll_y in scroll_positions:
+            try:
+                # Use thum.io free screenshot API
+                screenshot_url = f"https://image.thum.io/get/width/1280/crop/800/viewportWidth/1280/png/{url}"
+                if scroll_y > 0:
+                    screenshot_url = f"https://image.thum.io/get/width/1280/crop/800/viewportWidth/1280/scrollTo/{scroll_y}/png/{url}"
+                resp = await client.get(screenshot_url)
+                if resp.status_code == 200 and len(resp.content) > 10000:
+                    images.append(resp.content)
+                    print(f"  Screenshot at scroll={scroll_y}: {len(resp.content)} bytes")
+                if len(images) >= 12:
+                    break
+            except Exception as e:
+                print(f"  Screenshot failed at scroll={scroll_y}: {e}")
+                continue
+
+    return images
+
+
 async def scrape_images_from_url(url: str) -> list[bytes]:
-    """Scrape images from any URL."""
+    """Scrape images from any URL. Falls back to screenshots if no images found."""
     from bs4 import BeautifulSoup
-    from urllib.parse import urljoin
+    from urllib.parse import urljoin, unquote
 
     async with httpx.AsyncClient(
         follow_redirects=True,
@@ -88,8 +119,17 @@ async def scrape_images_from_url(url: str) -> list[bytes]:
     candidates = []
     for img in img_tags:
         src = img.get("src") or img.get("data-src") or img.get("data-lazy-src") or ""
-        if not src or "svg" in src or "data:" in src or "icon" in src.lower():
+        if not src or "data:" in src or "icon" in src.lower():
             continue
+        # Skip tiny SVGs but allow SVG URLs (they might be large illustrations)
+        if src.endswith(".svg") or "svg" in src.split("?")[0].split("/")[-1]:
+            continue
+        # Handle Next.js /_next/image URLs — extract the original URL
+        if "/_next/image" in src:
+            import re
+            match = re.search(r'url=([^&]+)', src)
+            if match:
+                src = unquote(match.group(1))
         if src.startswith("//"):
             src = "https:" + src
         elif src.startswith("/"):
@@ -98,16 +138,28 @@ async def scrape_images_from_url(url: str) -> list[bytes]:
             continue
         candidates.append(src)
 
-    # Also grab background images from style attributes and srcset
+    # Also grab from srcset (common in Next.js, responsive images)
     for tag in soup.find_all(attrs={"srcset": True}):
         srcset = tag.get("srcset", "")
         for part in srcset.split(","):
             src = part.strip().split(" ")[0]
+            if "/_next/image" in src:
+                import re
+                match = re.search(r'url=([^&]+)', src)
+                if match:
+                    src = unquote(match.group(1))
             if src.startswith("//"):
                 src = "https:" + src
             elif src.startswith("/"):
                 src = urljoin(url, src)
-            if src.startswith("http") and "svg" not in src:
+            if src.startswith("http") and not src.endswith(".svg"):
+                candidates.append(src)
+
+    # Also check og:image and meta images
+    for meta in soup.find_all("meta", attrs={"property": True}):
+        if "image" in (meta.get("property") or ""):
+            src = meta.get("content", "")
+            if src.startswith("http"):
                 candidates.append(src)
 
     # Deduplicate while preserving order
@@ -144,6 +196,11 @@ async def scrape_images_from_url(url: str) -> list[bytes]:
                     break
             except Exception:
                 continue
+
+    # Fallback: if no images found, take screenshots of the website
+    if not images:
+        print(f"  No images found via scraping, falling back to screenshots...")
+        images = await screenshot_website(url)
 
     return images
 
