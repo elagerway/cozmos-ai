@@ -287,6 +287,7 @@ export default function PublicSharePage({
             </Link>{" "}
             — AI-Powered 360° Biosphere Generation
           </p>
+          <p className="font-mono text-[10px] text-muted-foreground/40 mt-1">{process.env.NEXT_PUBLIC_COMMIT_HASH}</p>
         </div>
       </footer>
 

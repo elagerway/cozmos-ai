@@ -620,7 +620,7 @@ export default function HomePage() {
       <footer className="border-t border-white/5 py-8">
         <div className="max-w-6xl mx-auto px-6 flex items-center justify-between text-xs text-muted-foreground">
           <span>Biosphere &copy; 2026</span>
-          <span>AI-Powered Biosphere Generation</span>
+          <span className="font-mono text-[10px] text-muted-foreground/40">{process.env.NEXT_PUBLIC_COMMIT_HASH}</span>
         </div>
       </footer>
     </div>
