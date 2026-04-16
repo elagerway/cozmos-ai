@@ -41,6 +41,13 @@ TILES_DIR.mkdir(parents=True, exist_ok=True)
 FAL_KEY = os.environ.get("FAL_KEY", "")
 BLOCKADE_API_KEY = os.environ.get("BLOCKADE_API_KEY", "")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+
+# Get git commit hash at startup
+import subprocess
+try:
+    COMMIT_HASH = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
+except Exception:
+    COMMIT_HASH = os.environ.get("RAILWAY_GIT_COMMIT_SHA", "unknown")[:7]
 SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 
 TILE_SIZE = 1024
@@ -696,10 +703,13 @@ def upload_to_supabase(path: str, data: bytes, content_type: str = "image/jpeg")
 
 
 def save_generation_record(gen_id: str, data: dict):
-    """Save a generation record to Supabase."""
+    """Save a generation record to Supabase. Includes pipeline commit hash."""
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
         return
     import requests
+    # Inject commit hash into step_label
+    if "step_label" in data:
+        data["step_label"] = f"{data['step_label']} [{COMMIT_HASH}]"
     url = f"{SUPABASE_URL}/rest/v1/generations"
     resp = requests.post(
         url,
