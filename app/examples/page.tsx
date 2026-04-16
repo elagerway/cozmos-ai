@@ -271,10 +271,14 @@ export default function ExamplesPage() {
                     >
                       View sphere
                     </Link>
-                    <span className="text-white/20">&middot;</span>
-                    <span className="text-xs text-muted-foreground">
-                      {example.environment}
-                    </span>
+                    {example.created_at && (
+                      <>
+                        <span className="text-white/20">&middot;</span>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(example.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
