@@ -85,8 +85,13 @@ class InfluencerProfile:
 
 
 async def search_youtube_handle(name: str) -> str | None:
-    """Search YouTube for a person/brand name and return their channel handle."""
+    """Search YouTube for a person/brand name and return their main channel handle.
+
+    Checks multiple channel results and picks the one whose name best matches
+    the search query, preferring channels with the person's actual name.
+    """
     search_url = f"https://www.youtube.com/results?search_query={name.replace(' ', '+')}&sp=EgIQAg%3D%3D"
+    name_lower = name.lower()
 
     try:
         async with httpx.AsyncClient(
@@ -97,32 +102,83 @@ async def search_youtube_handle(name: str) -> str | None:
             if resp.status_code != 200:
                 return None
 
-            # Extract channel IDs from search results (first result is usually the best match)
-            channel_ids = re.findall(r'"channelId":"([^"]+)"', resp.text)
+            # Extract unique channel IDs (deduplicated, preserve order)
+            all_ids = re.findall(r'"channelId":"([^"]+)"', resp.text)
+            seen = set()
+            channel_ids = []
+            for cid in all_ids:
+                if cid not in seen:
+                    seen.add(cid)
+                    channel_ids.append(cid)
+
             if not channel_ids:
                 return None
 
-            # Visit the top channel to get its handle
-            ch_url = f"https://www.youtube.com/channel/{channel_ids[0]}"
-            print(f"  YouTube search: visiting {ch_url}...")
-            ch_resp = await client.get(ch_url)
-            if ch_resp.status_code == 200:
-                # Try multiple patterns for handle extraction
-                for pattern in [
-                    r'"vanityChannelUrl":"http[s]?://www\.youtube\.com/@([^"]+)"',
-                    r'"channelUrl":"http[s]?://www\.youtube\.com/@([^"]+)"',
-                    r'"canonicalBaseUrl":"/@([^"]+)"',
-                    r'"ownerUrls":\["http[s]?://www\.youtube\.com/@([^"]+)"\]',
-                ]:
-                    match = re.search(pattern, ch_resp.text)
-                    if match:
-                        handle = match.group(1)
-                        print(f"  YouTube search found handle: @{handle}")
-                        return handle
+            # Check up to 5 channels, find the best name match
+            best_handle = None
+            best_score = -1
 
-                # Last resort: use the channel ID directly
-                print(f"  YouTube search: using channel ID as fallback")
-                return f"channel/{channel_ids[0]}"
+            for cid in channel_ids[:5]:
+                ch_url = f"https://www.youtube.com/channel/{cid}"
+                try:
+                    ch_resp = await client.get(ch_url)
+                    if ch_resp.status_code != 200:
+                        continue
+
+                    # Extract channel name
+                    ch_name = ""
+                    ch_name_match = re.search(r'"channelName":"([^"]+)"', ch_resp.text)
+                    if ch_name_match:
+                        ch_name = ch_name_match.group(1)
+
+                    # Extract handle
+                    handle = None
+                    for pattern in [
+                        r'"vanityChannelUrl":"http[s]?://www\.youtube\.com/@([^"]+)"',
+                        r'"canonicalBaseUrl":"/@([^"]+)"',
+                    ]:
+                        match = re.search(pattern, ch_resp.text)
+                        if match:
+                            handle = match.group(1)
+                            break
+
+                    if not handle:
+                        handle = f"channel/{cid}"
+
+                    # Score: how well does this channel match the search name?
+                    score = 0
+                    ch_name_lower = ch_name.lower()
+                    if ch_name_lower == name_lower:
+                        score = 100  # Exact match
+                    elif name_lower in ch_name_lower:
+                        score = 80  # Name contained in channel name
+                    elif ch_name_lower in name_lower:
+                        score = 60  # Channel name contained in search
+
+                    # Check subscriber count as tiebreaker
+                    sub_match = re.search(r'"subscriberCountText":\{"simpleText":"([^"]+)"', ch_resp.text)
+                    if sub_match:
+                        sub_text = sub_match.group(1).lower()
+                        if "m " in sub_text or "m sub" in sub_text:
+                            score += 10  # Millions of subscribers = likely the main channel
+
+                    print(f"  YouTube search: {ch_name} (@{handle}) score={score}")
+
+                    if score > best_score:
+                        best_score = score
+                        best_handle = handle
+
+                    # Perfect match, stop looking
+                    if score >= 100:
+                        break
+
+                except Exception:
+                    continue
+
+            if best_handle:
+                print(f"  YouTube search: best match @{best_handle} (score={best_score})")
+            return best_handle
+
     except Exception as e:
         print(f"  YouTube search failed: {e}")
 
