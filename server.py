@@ -815,10 +815,57 @@ def run_pipeline(gen_id: str, brand: str, source_url: str = ""):
         update("scrape", 10, f"Found {len(raw_images)} images")
 
         if not raw_images:
-            generations[gen_id].update({"status": "failed", "error": "No images found"})
-            update_generation_status(gen_id, {"status": "failed", "error": "No images found"})
-            loop.close()
-            return
+            # No images found via scraping — fall through to pure AI generation
+            print(f"  No images found for {brand or source_url}, falling through to AI generation")
+            update("scrape", 10, "No scrapeable content found, generating AI environment...")
+            if BLOCKADE_API_KEY:
+                from sphere_gen import generate_sphere_from_prompt
+                from style_analyzer import build_blockade_prompt
+                prompt_text = generations[gen_id].get("prompt", brand or "modern studio")
+                def on_ai_progress(status):
+                    if status == "processing":
+                        update("upscale", 40, "AI rendering 360° environment...")
+                    elif status == "exporting_16k":
+                        update("upscale", 55, "Exporting 16K...")
+                canvas = loop.run_until_complete(
+                    generate_sphere_from_prompt(prompt_text, on_progress=on_ai_progress)
+                )
+                update("compose", 70, "AI environment generated")
+                loop.close()
+                # Skip upscale/compose, go straight to tiles
+                def on_tile_progress(done, total):
+                    pct = 72 + int(23 * (done / total))
+                    update("tiles", pct, f"Generating tiles ({done}/{total})...")
+                update("tiles", 72, "Generating tile pyramid...")
+                generate_tiles(canvas, gen_id, on_progress=on_tile_progress)
+                update("tiles", 95, "Tiles generated")
+                update("save", 96, "Saving to cloud...")
+                duration = int(time.time() - start)
+                if SUPABASE_URL:
+                    tile_base_url = f"{SUPABASE_URL}/storage/v1/object/public/spheres"
+                    image_url = f"{tile_base_url}/{gen_id}.jpg"
+                else:
+                    tile_base_url = ""
+                    image_url = f"/spheres/{gen_id}.jpg"
+                update_generation_status(gen_id, {
+                    "status": "done", "step": "done",
+                    "step_label": f"Your sphere is ready [{COMMIT_HASH}]",
+                    "image_url": image_url, "tile_stem": gen_id,
+                    "tile_base_url": tile_base_url, "duration_s": duration,
+                })
+                generations[gen_id].update({
+                    "status": "done", "step": "done", "pct": 100,
+                    "label": "Your sphere is ready",
+                    "image_url": image_url, "tile_stem": gen_id,
+                    "tile_base_url": tile_base_url, "duration_s": duration,
+                })
+                print(f"AI fallback complete: {gen_id} in {duration}s")
+                return
+            else:
+                generations[gen_id].update({"status": "failed", "error": "No content found and AI generation unavailable"})
+                update_generation_status(gen_id, {"status": "failed", "error": "No content found"})
+                loop.close()
+                return
 
         # Check source image quality
         max_dim = 0
@@ -1026,10 +1073,11 @@ async def generate_about_me(body: dict):
             update("scrape", 10, f"Found {len(profile.youtube.videos) if profile.youtube else 0} videos")
 
             if not profile.youtube and not profile.twitter:
-                generations[gen_id].update({"status": "failed", "error": f"Could not find profile data for {name}"})
-                update_generation_status(gen_id, {"status": "failed", "error": f"Could not find profile data for {name}"})
-                loop.close()
-                return
+                # No profile data found — still generate a sphere from the prompt
+                print(f"  No profile data for {name}, generating generic AI environment")
+                update("scrape", 10, "No profile found, generating AI environment...")
+                profile.bio = f"Content creator"
+                profile.name = name
 
             # Step 2: Generate branded environment
             blockade_prompt = build_about_me_prompt(profile)
