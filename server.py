@@ -562,10 +562,10 @@ async def upscale_all_parallel(images: list[bytes], on_progress=None) -> list[by
 def compose_on_environment(images: list[bytes], environment: pyvips.Image) -> pyvips.Image:
     """Composite upscaled images onto a Blockade-generated environment.
 
-    Images are placed in the equatorial band with subtle shadow/border
-    effects so they blend naturally with the AI environment.
+    Images are placed as small framed photos scattered in the equatorial band.
+    Sized to ~15-20% of canvas width so the environment dominates.
     """
-    PAD = 100
+    PAD = 200
     canvas = environment
 
     n = len(images)
@@ -578,67 +578,46 @@ def compose_on_environment(images: list[bytes], environment: pyvips.Image) -> py
             img = img[:3]
         return img
 
-    # Place images in the equatorial band: 25%-75% of canvas height
-    # Narrower band than solid-color version since the environment is visible
-    BAND_TOP = int(CANVAS_H * 0.25)
-    BAND_BOT = int(CANVAS_H * 0.75)
+    # Use only 4-6 images max, placed as small frames scattered around
+    # The environment should dominate — images are accents, not wallpaper
+    BAND_TOP = int(CANVAS_H * 0.30)
+    BAND_BOT = int(CANVAS_H * 0.70)
     BAND_H = BAND_BOT - BAND_TOP
 
-    heroes = images[:3] if n >= 3 else images
-    products = images[3:] if n > 3 else []
+    # Limit to 6 images, no hero/product distinction — all same small size
+    display_images = images[:6]
 
-    def add_image_with_frame(canvas, img_bytes, x, y, max_w, max_h):
-        """Add an image with a subtle dark frame for contrast against the environment."""
+    # Each image is ~15% of canvas width — small framed photos, not billboards
+    frame_max_w = int(CANVAS_W * 0.12)
+    frame_max_h = int(BAND_H * 0.35)
+
+    # Scatter positions — evenly spaced around the panorama
+    positions = [
+        (int(CANVAS_W * 0.08), BAND_TOP + int(BAND_H * 0.15)),
+        (int(CANVAS_W * 0.25), BAND_TOP + int(BAND_H * 0.55)),
+        (int(CANVAS_W * 0.42), BAND_TOP + int(BAND_H * 0.20)),
+        (int(CANVAS_W * 0.58), BAND_TOP + int(BAND_H * 0.50)),
+        (int(CANVAS_W * 0.75), BAND_TOP + int(BAND_H * 0.15)),
+        (int(CANVAS_W * 0.88), BAND_TOP + int(BAND_H * 0.55)),
+    ]
+
+    for i, img_bytes in enumerate(display_images):
+        if i >= len(positions):
+            break
+        px, py = positions[i]
         img = load_img(img_bytes)
-        scale = min(max_w / img.width, max_h / img.height)
+        scale = min(frame_max_w / img.width, frame_max_h / img.height)
         resized = img.resize(scale, kernel=pyvips.enums.Kernel.LANCZOS3)
 
-        # Create a dark semi-transparent backing slightly larger than the image
-        frame_pad = 6
-        frame_w = resized.width + frame_pad * 2
-        frame_h = resized.height + frame_pad * 2
-
-        # Dark frame background
-        frame = pyvips.Image.black(frame_w, frame_h, bands=3) + [20, 20, 20]
-
-        # Place frame, then image on top
-        fx = max(0, x - frame_pad)
-        fy = max(0, y - frame_pad)
-        if fx + frame_w <= canvas.width and fy + frame_h <= canvas.height:
+        # Dark frame border
+        frame_pad = 8
+        frame = pyvips.Image.black(resized.width + frame_pad * 2, resized.height + frame_pad * 2, bands=3) + [25, 25, 25]
+        fx = max(0, px - frame_pad)
+        fy = max(0, py - frame_pad)
+        if fx + frame.width <= canvas.width and fy + frame.height <= canvas.height:
             canvas = canvas.insert(frame, fx, fy)
-        canvas = canvas.insert(resized, x, y)
-        return canvas
-
-    # Top row: heroes
-    top_h = BAND_H // 2 - PAD
-    top_cell_w = (CANVAS_W - PAD * (len(heroes) + 1)) // max(len(heroes), 1)
-
-    for i, img_bytes in enumerate(heroes):
-        img = load_img(img_bytes)
-        scale = min(top_cell_w / img.width, top_h / img.height)
-        resized = img.resize(scale, kernel=pyvips.enums.Kernel.LANCZOS3)
-        x = PAD + i * (top_cell_w + PAD) + (top_cell_w - resized.width) // 2
-        y = BAND_TOP + PAD + (top_h - resized.height) // 2
-        canvas = add_image_with_frame(canvas, img_bytes, x, y, top_cell_w, top_h)
-
-    # Bottom: products
-    if products:
-        bot_start = BAND_TOP + BAND_H // 2 + PAD // 2
-        bot_h_total = BAND_BOT - bot_start - PAD
-        cols = min(len(products), 5)
-        rows = (len(products) + cols - 1) // cols
-        row_h = (bot_h_total - PAD * (rows - 1)) // max(rows, 1)
-        cell_w = (CANVAS_W - PAD * (cols + 1)) // cols
-
-        for idx, img_bytes in enumerate(products):
-            r = idx // cols
-            c = idx % cols
-            img = load_img(img_bytes)
-            scale = min(cell_w / img.width, row_h / img.height)
-            resized = img.resize(scale, kernel=pyvips.enums.Kernel.LANCZOS3)
-            x = PAD + c * (cell_w + PAD) + (cell_w - resized.width) // 2
-            y = bot_start + r * (row_h + PAD) + (row_h - resized.height) // 2
-            canvas = add_image_with_frame(canvas, img_bytes, x, y, cell_w, row_h)
+        if px + resized.width <= canvas.width and py + resized.height <= canvas.height:
+            canvas = canvas.insert(resized, px, py)
 
     return canvas
 
