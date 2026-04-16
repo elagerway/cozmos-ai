@@ -600,7 +600,7 @@ def build_about_me_prompt(profile: InfluencerProfile) -> str:
 
     # Every environment includes: wall-mounted TV screens, framed pictures on walls,
     # and a central display area. NO text, names, or words in the scene — AI renders text badly.
-    screen_desc = "Large flat-screen TVs mounted on walls with blank dark screens, elegant empty picture frames on walls, a central display pedestal"
+    screen_desc = "Large flat-screen TVs mounted on walls turned off with solid black screens, elegant empty picture frames on walls, a display pedestal"
 
     if any(w in bio_lower for w in ["tech", "review", "gadget", "phone", "computer", "software"]):
         env = f"a sleek modern tech studio, dark walls with subtle colored LED accent lighting, {screen_desc}, professional camera equipment on tripods, cinematic studio lighting"

@@ -39,7 +39,7 @@ async def generate_skybox(prompt: str, style_id: int = None, on_progress=None) -
         "prompt": prompt,
         "skybox_style_id": style_id or DEFAULT_STYLE_ID,
         "enhance_prompt": True,
-        "negative_text": "text, words, letters, writing, signs, labels, logos, watermarks, names, titles, captions, numbers on walls",
+        "negative_text": "text, words, letters, writing, signs, labels, logos, watermarks, names, titles, captions, numbers, typography, font, alphabet, symbols, glyphs, brand names, slogans, banners, posters with text, screens with text, monitors with text",
     }
 
     async with httpx.AsyncClient(timeout=180.0) as client:
