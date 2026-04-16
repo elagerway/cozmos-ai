@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { EXAMPLES, Example } from "@/lib/dummy-data"
@@ -63,8 +63,10 @@ export default function ExamplesPage() {
           brand: r.brand || undefined, tile_stem: r.tile_stem,
           tile_base_url: r.tile_base_url,
         }))
-        const seen = new Set(generated.map((g) => g.id))
-        setAllExamples([...generated, ...EXAMPLES.filter((e) => !seen.has(e.id))])
+        // Filter out items the user already deleted this session
+        const filtered = generated.filter((g) => !deletedIds.current.has(g.id))
+        const seen = new Set(filtered.map((g) => g.id))
+        setAllExamples([...filtered, ...EXAMPLES.filter((e) => !seen.has(e.id))])
       })
     }
 
@@ -75,12 +77,13 @@ export default function ExamplesPage() {
     return () => clearInterval(interval)
   }, [allExamples.some((e) => e.status === "running")])
 
+  const deletedIds = useRef(new Set<string>())
+
   async function handleDelete(id: string) {
     if (!confirm("Delete this sphere?")) return
-    const ok = await deleteGeneration(id)
-    if (ok) {
-      setAllExamples((prev) => prev.filter((e) => e.id !== id))
-    }
+    deletedIds.current.add(id)
+    setAllExamples((prev) => prev.filter((e) => e.id !== id))
+    await deleteGeneration(id)
   }
 
   function toggleFeatured(id: string) {
