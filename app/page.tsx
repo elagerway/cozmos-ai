@@ -585,47 +585,9 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* How it Works — only show when not generating */}
+      {/* Sample Spheres Gallery — only show when not generating */}
       {!generating && !done && (
         <>
-          <section className="max-w-5xl mx-auto px-6 py-20">
-            <h2 className="text-2xl font-bold text-center mb-12">
-              How it works
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              {[
-                {
-                  step: "01",
-                  title: "Describe",
-                  desc: "Write a brief describing your campaign. Mention a social media profile like @nike or @starbucks to pull their visual style automatically.",
-                },
-                {
-                  step: "02",
-                  title: "Generate",
-                  desc: "Our AI scans the social profile, extracts brand colors, mood, and visual style, then generates a panoramic background that matches.",
-                },
-                {
-                  step: "03",
-                  title: "Explore",
-                  desc: "View your rendered 360° sphere in the browser. Drag to look around. Share with a link — no login required.",
-                },
-              ].map((item) => (
-                <div
-                  key={item.step}
-                  className="relative p-6 rounded-xl border border-white/5 bg-white/[0.02]"
-                >
-                  <span className="text-xs font-mono text-blue-400/60 mb-3 block">
-                    {item.step}
-                  </span>
-                  <h3 className="text-lg font-semibold mb-2">{item.title}</h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {item.desc}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </section>
-
           {/* Sample Spheres Gallery */}
           <section className="max-w-6xl mx-auto px-6 py-20">
             <h2 className="text-2xl font-bold text-center mb-4">
