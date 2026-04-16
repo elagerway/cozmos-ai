@@ -798,6 +798,13 @@ def generate_tiles(canvas: pyvips.Image, sphere_id: str, upload: bool = True, on
     if upload:
         upload_to_supabase(f"{sphere_id}.jpg", buf)
 
+    # Small thumbnail for gallery cards (~30-50KB)
+    thumb = canvas.resize(600 / canvas.width, kernel=pyvips.enums.Kernel.LANCZOS3, vscale=300 / canvas.height)
+    thumb_buf = thumb.write_to_buffer(".jpg[Q=60]")
+    (SPHERES_DIR / f"{sphere_id}_thumb.jpg").write_bytes(thumb_buf)
+    if upload:
+        upload_to_supabase(f"{sphere_id}_thumb.jpg", thumb_buf)
+
     return sphere_id
 
 
@@ -1111,21 +1118,9 @@ async def generate_about_me(body: dict):
             scene_elements = loop.run_until_complete(detect_scene_elements(env_jpg))
             update("compose", 62, f"Found {len(scene_elements)} display surfaces")
 
-            # Composite thumbnails onto the environment for immediate visual impact
-            if profile.thumbnail_images:
-                update("compose", 64, f"Upscaling {len(profile.thumbnail_images)} images...")
-
-                def on_up_progress(done, total):
-                    pct = 64 + int(4 * (done / total))
-                    update("compose", pct, f"Enhancing image {done}/{total}...")
-
-                upscaled = loop.run_until_complete(
-                    upscale_all_parallel(profile.thumbnail_images, on_progress=on_up_progress)
-                )
-                update("compose", 68, "Compositing content onto environment...")
-                canvas = compose_on_environment(upscaled, environment)
-            else:
-                canvas = environment
+            # All content displayed via interactive markers — no compositing.
+            # Everything is moveable in edit mode.
+            canvas = environment
 
             loop.close()
             update("compose", 70, "Sphere composed")
@@ -1152,8 +1147,12 @@ async def generate_about_me(body: dict):
                             "view_count": v.view_count,
                             "url": v.url,
                         })
-                # Build image URLs
+                # Build image URLs — Instagram posts + YouTube thumbnails
                 ig_images = profile.instagram.post_images[:4] if profile.instagram else []
+                # Add YouTube thumbnails as images too
+                if profile.youtube:
+                    for v in profile.youtube.videos[:6]:
+                        ig_images.append(v.thumbnail_url)
                 # Build profile data
                 profile_data = {
                     "name": profile.name,

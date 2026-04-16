@@ -228,6 +228,28 @@ def assign_content_to_positions(
                 "data": video,
             })
 
+    # Place remaining images at default positions if not enough frames detected
+    assigned_image_count = min(len(frames), len(images))
+    remaining_images = images[assigned_image_count:]
+    default_img_positions = [
+        {"yaw": -45, "pitch": 15}, {"yaw": -15, "pitch": 18},
+        {"yaw": 15, "pitch": 18}, {"yaw": 45, "pitch": 15},
+        {"yaw": -75, "pitch": 12}, {"yaw": 75, "pitch": 12},
+    ]
+    for i, img_url in enumerate(remaining_images[:6]):
+        if i >= len(default_img_positions):
+            break
+        pos = default_img_positions[i]
+        too_close = any(abs(m["yaw"] - pos["yaw"]) < 20 for m in markers)
+        if not too_close:
+            markers.append({
+                "type": "image",
+                "yaw": pos["yaw"],
+                "pitch": pos["pitch"],
+                "scene_width": 200,
+                "data": {"image_url": img_url, "source": "youtube"},
+            })
+
     # If no profile card was placed (no TVs found), add at center
     if not any(m["type"] == "profile" for m in markers):
         markers.insert(0, {
