@@ -1272,11 +1272,14 @@ async def generate(body: dict):
         # Extract the person's name — look for "for [Name]" or "based on [Name]"
         import re as re_mod
         name_match = re_mod.search(
-            r'(?:for|about|of|based on|featuring)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)',
-            prompt
+            r'(?:for|about|of|based on|featuring)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)*)',
+            prompt,
+            re_mod.IGNORECASE,
         )
         about_me_name = name_match.group(1).strip() if name_match else brand
-        if about_me_name:
+        # Filter out noise words
+        noise = {"a", "an", "the", "my", "our", "your", "this", "that", "new", "sphere"}
+        if about_me_name and about_me_name.lower() not in noise:
             return await generate_about_me({"name": about_me_name, "prompt": prompt})
 
     # If no explicit brand or URL, try to extract from the prompt
