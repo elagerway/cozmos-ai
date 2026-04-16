@@ -205,9 +205,54 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
         ? `${tileBaseUrl}/tiles/${stem}`
         : `/spheres/tiles/${stem}`
 
-      // Inject smooth marker transitions
+      // Inject styles for markers and edit mode
       const style = document.createElement("style")
-      style.textContent = `.psv-marker--normal { transition: transform 0.15s ease-out, opacity 0.2s; }`
+      style.textContent = `
+        .psv-marker--normal { transition: transform 0.15s ease-out, opacity 0.2s; }
+
+        /* Edit mode: dashed border on all markers */
+        .biosphere-edit-mode .psv-marker {
+          outline: 2px dashed rgba(59,130,246,0.5) !important;
+          outline-offset: 4px;
+          cursor: pointer !important;
+        }
+        .biosphere-edit-mode .psv-marker:hover {
+          outline-color: rgba(59,130,246,0.8) !important;
+        }
+
+        /* Selected marker: solid blue border */
+        .psv-marker.biosphere-selected {
+          outline: 2px solid rgba(59,130,246,0.9) !important;
+          outline-offset: 4px;
+          opacity: 0.7;
+        }
+
+        /* Dragging state: hide default cursor */
+        .biosphere-dragging .psv-canvas-container,
+        .biosphere-dragging .psv-overlay {
+          cursor: none !important;
+        }
+
+        /* Ghost element following cursor */
+        .biosphere-ghost {
+          position: fixed;
+          pointer-events: none;
+          z-index: 9999;
+          border: 2px dashed rgba(59,130,246,0.7);
+          border-radius: 4px;
+          background: rgba(59,130,246,0.08);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transform: translate(-50%, -50%);
+          font-family: Inter, system-ui, sans-serif;
+          font-size: 11px;
+          color: rgba(147,197,253,0.9);
+          text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+          white-space: nowrap;
+          padding: 0 8px;
+        }
+      `
       containerRef.current.appendChild(style)
 
       const viewer = new Viewer({
@@ -279,6 +324,54 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
 
           // In edit mode: select marker for repositioning
           if (editModeRef.current) {
+            // Remove previous selection highlight
+            document.querySelectorAll(".psv-marker.biosphere-selected").forEach((el) => {
+              el.classList.remove("biosphere-selected")
+            })
+            // Highlight the selected marker
+            const markerEl = e.marker?.domElement || document.getElementById(`psv-marker-${markerId}`)
+            if (markerEl) markerEl.classList.add("biosphere-selected")
+            // Set dragging cursor on PSV container
+            const psvContainer = containerRef.current?.querySelector(".psv-container")
+            if (psvContainer) psvContainer.classList.add("biosphere-dragging")
+
+            // Create ghost element that follows the cursor
+            let ghost = document.querySelector(".biosphere-ghost") as HTMLElement
+            if (ghost) ghost.remove()
+            ghost = document.createElement("div")
+            ghost.className = "biosphere-ghost"
+            // Size the ghost based on the marker
+            const markerRect = markerEl?.getBoundingClientRect()
+            const gw = markerRect ? Math.min(markerRect.width * 0.5, 200) : 120
+            const gh = markerRect ? Math.min(markerRect.height * 0.5, 140) : 80
+            ghost.style.width = `${gw}px`
+            ghost.style.height = `${gh}px`
+            ghost.textContent = "Click to drop"
+            // Append to PSV container so it shows in fullscreen too
+            const psvRoot = containerRef.current?.querySelector(".psv-container") || document.body
+            psvRoot.appendChild(ghost)
+
+            const psvEl = containerRef.current?.querySelector(".psv-container") as HTMLElement
+            const moveGhost = (ev: MouseEvent) => {
+              // In fullscreen the ghost is inside PSV so always visible
+              // In normal mode, check if cursor is inside the sphere viewer wrapper
+              const isFullscreen = !!document.fullscreenElement
+              if (!isFullscreen && psvEl) {
+                const wrapperRect = containerRef.current?.getBoundingClientRect()
+                if (wrapperRect) {
+                  const inside = ev.clientX >= wrapperRect.left && ev.clientX <= wrapperRect.right &&
+                                 ev.clientY >= wrapperRect.top && ev.clientY <= wrapperRect.bottom
+                  ghost.style.display = inside ? "flex" : "none"
+                }
+              } else {
+                ghost.style.display = "flex"
+              }
+              ghost.style.left = `${ev.clientX}px`
+              ghost.style.top = `${ev.clientY}px`
+            }
+            document.addEventListener("mousemove", moveGhost)
+            ;(ghost as any).__cleanup = () => document.removeEventListener("mousemove", moveGhost)
+
             selectedMarkerRef.current = markerId
             setSelectedMarker(markerId)
             return
@@ -319,6 +412,18 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
               } as any)
             } catch (err) {
             }
+            // Remove selection highlight, dragging cursor, and ghost
+            document.querySelectorAll(".psv-marker.biosphere-selected").forEach((el) => {
+              el.classList.remove("biosphere-selected")
+            })
+            const psvC = containerRef.current?.querySelector(".psv-container")
+            if (psvC) psvC.classList.remove("biosphere-dragging")
+            const ghost = document.querySelector(".biosphere-ghost") as any
+            if (ghost) {
+              ghost.__cleanup?.()
+              ghost.remove()
+            }
+
             selectedMarkerRef.current = null
             setSelectedMarker(null)
           }
@@ -390,6 +495,23 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
                 selectedMarkerRef.current = null
                 setSelectedMarker(null)
               }
+              // Toggle edit-mode styling on all markers
+              const psvContainer = containerRef.current?.querySelector(".psv-container")
+              if (psvContainer) {
+                if (next) {
+                  psvContainer.classList.add("biosphere-edit-mode")
+                } else {
+                  psvContainer.classList.remove("biosphere-edit-mode")
+                  psvContainer.classList.remove("biosphere-dragging")
+                  // Remove ghost cursor
+                  const ghost = document.querySelector(".biosphere-ghost") as any
+                  if (ghost) { ghost.__cleanup?.(); ghost.remove() }
+                  // Remove selection highlights
+                  document.querySelectorAll(".psv-marker.biosphere-selected").forEach((el) => {
+                    el.classList.remove("biosphere-selected")
+                  })
+                }
+              }
             }}
             style={{
               padding: "6px 12px", fontSize: 12, borderRadius: 8,
@@ -408,7 +530,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
               color: selectedMarker ? "rgba(147,197,253,1)" : "rgba(255,255,255,0.4)",
               border: selectedMarker ? "1px solid rgba(59,130,246,0.3)" : "none",
             }}>
-              {selectedMarker ? "Click anywhere to place" : "Click a marker to select it"}
+              {selectedMarker ? "Click to drop" : "Click a marker to move it"}
             </span>
           )}
         </div>
