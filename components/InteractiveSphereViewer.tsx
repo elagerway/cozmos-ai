@@ -173,6 +173,9 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
   const [ready, setReady] = useState(false)
   const [editMode, setEditMode] = useState(false)
   const editModeRef = useRef(false)
+  const selectedMarkerRef = useRef<string | null>(null)
+  const [selectedMarker, setSelectedMarker] = useState<string | null>(null)
+  const markersPluginRef = useRef<any>(null)
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -268,13 +271,20 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
           }
         }
 
-        // Handle clicks — toggle video play/stop IN the sphere
+        // Handle marker clicks
         markersPlugin.addEventListener("select-marker", (e: any) => {
           const markerConfig = e.marker?.config || e.marker
+          const markerId = markerConfig?.id || ""
           const data = markerConfig?.data
-          if (!data?.video_id) return
 
-          const markerId = `video-${data.video_id}`
+          // In edit mode: select marker for repositioning
+          if (editModeRef.current) {
+            selectedMarkerRef.current = markerId
+            setSelectedMarker(markerId)
+            return
+          }
+
+          if (!data?.video_id) return
 
           const sw = data.sceneWidth || 360
           if (playingVideos.has(data.video_id)) {
@@ -294,52 +304,25 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
           }
         })
 
-        // Drag handling for edit mode
-        let dragMarkerEl: HTMLElement | null = null
-        let dragMarkerId: string | null = null
+        markersPluginRef.current = markersPlugin
 
-        const onPointerDown = (e: PointerEvent) => {
-          if (!editModeRef.current) return
-          const markerEl = (e.target as HTMLElement).closest(".psv-marker") as HTMLElement
-          if (!markerEl) return
-          e.stopPropagation()
-          e.preventDefault()
-          dragMarkerEl = markerEl
-          dragMarkerId = markerEl.id?.replace("psv-marker-", "") || null
-          markerEl.style.cursor = "grabbing"
-          markerEl.style.opacity = "0.7"
-          markerEl.setPointerCapture(e.pointerId)
-        }
-
-        const onPointerMove = (e: PointerEvent) => {
-          if (!dragMarkerEl || !dragMarkerId) return
-          e.stopPropagation()
-          e.preventDefault()
-          // Convert screen position to sphere coordinates
-          const rect = containerRef.current!.getBoundingClientRect()
-          const viewerPos = viewer.dataHelper.viewerCoordsToSphericalCoords({
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top,
-          })
-          if (viewerPos) {
-            markersPlugin.updateMarker({
-              id: dragMarkerId,
-              position: viewerPos,
-            } as any)
+        // Edit mode: click sphere to move selected marker
+        viewer.addEventListener("click", (e: any) => {
+          if (!editModeRef.current || !selectedMarkerRef.current) return
+          const yaw = e.data?.yaw
+          const pitch = e.data?.pitch
+          if (yaw !== undefined && pitch !== undefined) {
+            try {
+              markersPlugin.updateMarker({
+                id: selectedMarkerRef.current,
+                position: { yaw, pitch },
+              } as any)
+            } catch (err) {
+            }
+            selectedMarkerRef.current = null
+            setSelectedMarker(null)
           }
-        }
-
-        const onPointerUp = (e: PointerEvent) => {
-          if (!dragMarkerEl) return
-          dragMarkerEl.style.cursor = "grab"
-          dragMarkerEl.style.opacity = "1"
-          dragMarkerEl = null
-          dragMarkerId = null
-        }
-
-        containerRef.current!.addEventListener("pointerdown", onPointerDown, true)
-        containerRef.current!.addEventListener("pointermove", onPointerMove, true)
-        containerRef.current!.addEventListener("pointerup", onPointerUp, true)
+        })
 
         // Listen for Stop button clicks inside playing videos
         const observer = new MutationObserver(() => {
@@ -374,7 +357,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
   }, [imageUrl, tileStem, tileBaseUrl, markers, ready])
 
   return (
-    <div className="relative w-full h-[600px] rounded-xl overflow-hidden border border-white/10">
+    <div className="relative w-full h-[600px] rounded-xl border border-white/10" style={{ zIndex: 20, isolation: "isolate" }}>
       <div ref={containerRef} className="w-full h-full" />
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm z-10">
@@ -384,30 +367,51 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
           </div>
         </div>
       )}
-      {/* Edit mode toggle */}
+      {/* Edit mode controls — injected into PSV container for fullscreen support */}
       {!loading && markers.length > 0 && (
-        <button
-          onClick={() => {
-            const next = !editMode
-            setEditMode(next)
-            editModeRef.current = next
-            // Toggle draggable class on all markers
-            document.querySelectorAll(".psv-marker").forEach((el) => {
-              if (!editMode) {
-                (el as HTMLElement).style.cursor = "grab"
-              } else {
-                (el as HTMLElement).style.cursor = ""
+        <div
+          ref={(el) => {
+            // Move this div inside the PSV container so it shows in fullscreen
+            if (el) {
+              const psv = containerRef.current?.querySelector(".psv-container")
+              if (psv && !psv.contains(el)) {
+                psv.appendChild(el)
               }
-            })
+            }
           }}
-          className={`absolute top-3 left-3 z-20 px-3 py-1.5 text-xs rounded-lg backdrop-blur-sm transition-all ${
-            editMode
-              ? "bg-blue-500/80 text-white border border-blue-400/50"
-              : "bg-black/40 text-white/50 border border-white/10 hover:text-white/80"
-          }`}
+          style={{ position: "absolute", top: 12, left: 12, zIndex: 90, display: "flex", alignItems: "center", gap: 8 }}
         >
-          {editMode ? "Done Editing" : "Edit Layout"}
-        </button>
+          <button
+            onClick={() => {
+              const next = !editMode
+              setEditMode(next)
+              editModeRef.current = next
+              if (!next) {
+                selectedMarkerRef.current = null
+                setSelectedMarker(null)
+              }
+            }}
+            style={{
+              padding: "6px 12px", fontSize: 12, borderRadius: 8,
+              backdropFilter: "blur(8px)", transition: "all 0.2s", cursor: "pointer",
+              border: editMode ? "1px solid rgba(59,130,246,0.5)" : "1px solid rgba(255,255,255,0.1)",
+              background: editMode ? "rgba(59,130,246,0.8)" : "rgba(0,0,0,0.4)",
+              color: editMode ? "white" : "rgba(255,255,255,0.5)",
+            }}
+          >
+            {editMode ? "Done Editing" : "Edit Layout"}
+          </button>
+          {editMode && (
+            <span style={{
+              padding: "4px 8px", fontSize: 10, borderRadius: 6,
+              background: selectedMarker ? "rgba(59,130,246,0.2)" : "rgba(0,0,0,0.4)",
+              color: selectedMarker ? "rgba(147,197,253,1)" : "rgba(255,255,255,0.4)",
+              border: selectedMarker ? "1px solid rgba(59,130,246,0.3)" : "none",
+            }}>
+              {selectedMarker ? "Click anywhere to place" : "Click a marker to select it"}
+            </span>
+          )}
+        </div>
       )}
     </div>
   )

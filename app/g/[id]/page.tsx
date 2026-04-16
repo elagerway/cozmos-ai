@@ -156,7 +156,7 @@ export default function PublicSharePage({
       </div>
 
       {/* Content */}
-      <div className="flex-1 max-w-5xl mx-auto px-6 py-8 w-full">
+      <div className="max-w-5xl mx-auto px-6 py-8 w-full [&>*]:pointer-events-auto" style={{ pointerEvents: "none" }}>
         {viewData.title && (
           <h1 className="text-2xl font-bold mb-2">
             {viewData.title}
