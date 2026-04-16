@@ -63,8 +63,8 @@ export default function ExamplesPage() {
     const stored = localStorage.getItem("biosphere-pending")
     if (!stored) return
     const jobs: PendingJob[] = JSON.parse(stored)
-    // Filter out jobs older than 10 minutes (likely finished or failed)
-    const recent = jobs.filter((j) => Date.now() - j.startedAt < 600000)
+    // Filter out jobs older than 5 minutes (Railway may have redeployed)
+    const recent = jobs.filter((j) => Date.now() - j.startedAt < 300000)
     if (recent.length === 0) {
       localStorage.removeItem("biosphere-pending")
       return
@@ -83,9 +83,8 @@ export default function ExamplesPage() {
           }
           stillPending.push(job)
         } catch {
-          // Polling failed — might be done, check next cycle
-          if (Date.now() - job.startedAt > 300000) continue // Drop after 5 min of errors
-          stillPending.push(job)
+          // Polling failed — server likely redeployed, drop the job
+          continue
         }
       }
       setPendingJobs(stillPending)
