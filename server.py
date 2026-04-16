@@ -1194,7 +1194,7 @@ async def generate(body: dict):
 
     # Detect "about me" intent — route to about-me pipeline
     prompt_lower = prompt.lower()
-    if any(phrase in prompt_lower for phrase in ["about me", "bio sphere", "influencer showcase", "creator showcase", "link in bio"]):
+    if any(phrase in prompt_lower for phrase in ["about me", "bio sphere", "bio for", "create bio", "create a bio", "influencer showcase", "creator showcase", "link in bio", "personal sphere"]):
         # Extract the person's name — look for "for [Name]" or "based on [Name]"
         import re as re_mod
         name_match = re_mod.search(
