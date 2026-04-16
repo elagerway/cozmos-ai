@@ -1111,10 +1111,21 @@ async def generate_about_me(body: dict):
             scene_elements = loop.run_until_complete(detect_scene_elements(env_jpg))
             update("compose", 62, f"Found {len(scene_elements)} display surfaces")
 
-            # For about-me spheres: DON'T composite flat images onto the panorama.
-            # Content is displayed via interactive markers at scene-detected positions.
-            # Compositing creates visual noise that conflicts with the markers.
-            canvas = environment
+            # Composite thumbnails onto the environment for immediate visual impact
+            if profile.thumbnail_images:
+                update("compose", 64, f"Upscaling {len(profile.thumbnail_images)} images...")
+
+                def on_up_progress(done, total):
+                    pct = 64 + int(4 * (done / total))
+                    update("compose", pct, f"Enhancing image {done}/{total}...")
+
+                upscaled = loop.run_until_complete(
+                    upscale_all_parallel(profile.thumbnail_images, on_progress=on_up_progress)
+                )
+                update("compose", 68, "Compositing content onto environment...")
+                canvas = compose_on_environment(upscaled, environment)
+            else:
+                canvas = environment
 
             loop.close()
             update("compose", 70, "Sphere composed")
