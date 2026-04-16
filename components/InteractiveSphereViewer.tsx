@@ -52,7 +52,7 @@ function ProfileCardHTML(data: ProfileMarkerData): string {
       border-left: 4px solid rgba(59,130,246,0.6);
       border-radius: 4px;
       padding: 28px 28px 24px;
-      width: 400px;
+      width: 320px;
       color: white;
       font-family: Inter, system-ui, sans-serif;
       cursor: default;
@@ -90,7 +90,7 @@ function VideoThumbnailHTML(data: VideoMarkerData): string {
       border: 12px solid #111;
       border-bottom: 18px solid #111;
       border-radius: 6px;
-      width: 640px;
+      width: 360px;
       overflow: hidden;
       color: white;
       font-family: Inter, system-ui, sans-serif;
@@ -122,7 +122,7 @@ function VideoPlayingHTML(data: VideoMarkerData): string {
       border: 12px solid #111;
       border-bottom: 18px solid #111;
       border-radius: 6px;
-      width: 640px;
+      width: 360px;
       overflow: hidden;
       color: white;
       font-family: Inter, system-ui, sans-serif;
@@ -155,7 +155,7 @@ function ImageFrameHTML(data: { image_url: string; source: string }): string {
       padding: 14px;
       border-radius: 2px;
       box-shadow: 0 8px 25px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,255,255,0.06);
-      width: 300px;
+      width: 160px;
       cursor: default;
     ">
       <div style="border:6px solid #f0ebe0;border-radius:1px;overflow:hidden;box-shadow:inset 0 0 10px rgba(0,0,0,0.15);">
