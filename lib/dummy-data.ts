@@ -9,6 +9,10 @@ export interface Example extends Generation {
 }
 
 export const EXAMPLES: Example[] = [
+// All examples now come from Supabase — no hardcoded entries
+]
+
+const _LEGACY_EXAMPLES: Example[] = [
   {
     id: "ex-nike-showroom",
     prompt: "Create a sphere inspired by @nike — bold, athletic, dark tones",

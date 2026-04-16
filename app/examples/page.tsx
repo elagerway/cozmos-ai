@@ -5,9 +5,17 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { EXAMPLES, Example } from "@/lib/dummy-data"
 import { fetchGenerations, deleteGeneration, GenerationRow } from "@/lib/supabase"
+import { pollStatus } from "@/lib/pipeline-client"
+
+interface PendingJob {
+  id: string
+  prompt: string
+  startedAt: number
+}
 
 export default function ExamplesPage() {
   const [allExamples, setAllExamples] = useState<Example[]>(EXAMPLES)
+  const [pendingJobs, setPendingJobs] = useState<PendingJob[]>([])
   // Track featured state locally (persisted in localStorage)
   const [featuredIds, setFeaturedIds] = useState<Set<string>>(new Set())
 
@@ -48,6 +56,59 @@ export default function ExamplesPage() {
       // Default to the ones marked featured in data
       setFeaturedIds(new Set(EXAMPLES.filter((e) => e.featured).map((e) => e.id)))
     }
+  }, [])
+
+  // Load and poll pending background jobs
+  useEffect(() => {
+    const stored = localStorage.getItem("biosphere-pending")
+    if (!stored) return
+    const jobs: PendingJob[] = JSON.parse(stored)
+    // Filter out jobs older than 10 minutes (likely finished or failed)
+    const recent = jobs.filter((j) => Date.now() - j.startedAt < 600000)
+    if (recent.length === 0) {
+      localStorage.removeItem("biosphere-pending")
+      return
+    }
+    setPendingJobs(recent)
+
+    // Poll each job
+    const interval = setInterval(async () => {
+      const stillPending: PendingJob[] = []
+      for (const job of recent) {
+        try {
+          const status = await pollStatus(job.id)
+          if (status.status === "done" || status.status === "failed") {
+            // Job finished — remove from pending, refresh examples
+            continue
+          }
+          stillPending.push(job)
+        } catch {
+          // Polling failed — might be done, check next cycle
+          if (Date.now() - job.startedAt > 300000) continue // Drop after 5 min of errors
+          stillPending.push(job)
+        }
+      }
+      setPendingJobs(stillPending)
+      localStorage.setItem("biosphere-pending", JSON.stringify(stillPending))
+      if (stillPending.length === 0) {
+        localStorage.removeItem("biosphere-pending")
+        clearInterval(interval)
+        // Refresh examples to show newly completed spheres
+        fetchGenerations().then((rows) => {
+          const generated: Example[] = rows.map((r: GenerationRow) => ({
+            id: r.id, prompt: r.prompt, status: "done" as const, step: "done" as const,
+            step_label: r.step_label, sphere_spec: null, bg_prompt: null, image_url: r.image_url,
+            error: null, cost_usd: r.cost_usd ? Number(r.cost_usd) : null, duration_s: r.duration_s,
+            created_at: r.created_at, featured: false, environment: "pipeline",
+            brand: r.brand || undefined, tile_stem: r.tile_stem, tile_base_url: r.tile_base_url,
+          }))
+          const seen = new Set(generated.map((g) => g.id))
+          setAllExamples([...generated, ...EXAMPLES.filter((e) => !seen.has(e.id))])
+        })
+      }
+    }, 3000)
+
+    return () => clearInterval(interval)
   }, [])
 
   async function handleDelete(id: string) {
@@ -103,6 +164,22 @@ export default function ExamplesPage() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* Pending background jobs */}
+          {pendingJobs.map((job) => (
+            <div
+              key={job.id}
+              className="rounded-xl overflow-hidden border border-blue-500/20 bg-blue-500/5"
+            >
+              <div className="aspect-[2/1] flex flex-col items-center justify-center gap-3">
+                <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                <span className="text-xs text-blue-300">Generating...</span>
+              </div>
+              <div className="p-4">
+                <h3 className="font-semibold text-sm truncate">{job.prompt.slice(0, 50)}</h3>
+                <p className="text-xs text-muted-foreground mt-1">In progress</p>
+              </div>
+            </div>
+          ))}
           {allExamples.map((example) => {
             const isFeatured = featuredIds.has(example.id)
             return (

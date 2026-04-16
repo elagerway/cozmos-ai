@@ -38,6 +38,7 @@ export default function HomePage() {
   const [submittedPrompt, setSubmittedPrompt] = useState("")
   const [detectedProfile, setDetectedProfile] = useState<SocialProfile | null>(null)
   const [lowResWarning, setLowResWarning] = useState(false)
+  const [activeGenId, setActiveGenId] = useState<string | null>(null)
 
   const resultRef = useRef<HTMLDivElement>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
@@ -143,6 +144,7 @@ export default function HomePage() {
           prompt.trim(),
           sourceUrl
         )
+        setActiveGenId(genId)
 
         // Poll for updates
         let pollFailures = 0
@@ -482,6 +484,12 @@ export default function HomePage() {
               <button
                 onClick={() => {
                   // Dismiss modal — generation continues in background
+                  // Save to localStorage so examples page can show spinner
+                  if (activeGenId) {
+                    const pending = JSON.parse(localStorage.getItem("biosphere-pending") || "[]")
+                    pending.push({ id: activeGenId, prompt: submittedPrompt, startedAt: Date.now() })
+                    localStorage.setItem("biosphere-pending", JSON.stringify(pending))
+                  }
                   setGenerating(false)
                   setDone(false)
                   setPrompt("")
