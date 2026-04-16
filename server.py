@@ -1058,7 +1058,7 @@ async def generate_about_me(body: dict):
     if not BLOCKADE_API_KEY:
         return JSONResponse({"error": "AI sphere generation not configured"}, status_code=503)
 
-    gen_id = f"gen-aboutme-{uuid.uuid4().hex[:8]}"
+    gen_id = f"gen-biosphere-{uuid.uuid4().hex[:8]}"
     generations[gen_id] = {
         "id": gen_id,
         "brand": name.lower().replace(" ", ""),
@@ -1238,7 +1238,7 @@ async def generate_about_me(body: dict):
             import traceback
             traceback.print_exc()
             generations[gen_id].update({"status": "failed", "error": str(e)})
-        update_generation_status(gen_id, {"status": "failed", "error": str(e)})
+            update_generation_status(gen_id, {"status": "failed", "error": str(e)})
 
     # Save running state to Supabase immediately so it survives restarts
     save_generation_record(gen_id, {
@@ -1416,7 +1416,7 @@ async def generate_from_prompt(body: dict):
             import traceback
             traceback.print_exc()
             generations[gen_id].update({"status": "failed", "error": str(e)})
-        update_generation_status(gen_id, {"status": "failed", "error": str(e)})
+            update_generation_status(gen_id, {"status": "failed", "error": str(e)})
 
     save_generation_record(gen_id, {
         "prompt": prompt,

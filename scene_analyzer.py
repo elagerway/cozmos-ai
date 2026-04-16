@@ -232,9 +232,9 @@ def assign_content_to_positions(
     assigned_image_count = min(len(frames), len(images))
     remaining_images = images[assigned_image_count:]
     default_img_positions = [
-        {"yaw": -45, "pitch": 15}, {"yaw": -15, "pitch": 18},
-        {"yaw": 15, "pitch": 18}, {"yaw": 45, "pitch": 15},
-        {"yaw": -75, "pitch": 12}, {"yaw": 75, "pitch": 12},
+        {"yaw": -60, "pitch": 14}, {"yaw": -20, "pitch": 16},
+        {"yaw": 20, "pitch": 16}, {"yaw": 60, "pitch": 14},
+        {"yaw": -100, "pitch": 12}, {"yaw": 100, "pitch": 12},
     ]
     for i, img_url in enumerate(remaining_images[:6]):
         if i >= len(default_img_positions):
