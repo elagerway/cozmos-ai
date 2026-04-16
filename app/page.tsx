@@ -462,8 +462,51 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* Generation Progress Modal */}
+      {generating && !done && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-[#1a1a1a] border border-white/10 rounded-xl p-8 max-w-lg w-full mx-4 space-y-6">
+            <div>
+              <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Brief</p>
+              <p className="text-foreground text-sm">{submittedPrompt}</p>
+            </div>
+
+            <GenerationProgress
+              currentStep={step}
+              pct={pct}
+              label={label}
+              hasSocialProfile={!!detectedProfile}
+            />
+
+            <div className="flex gap-3 justify-end pt-2">
+              <button
+                onClick={() => {
+                  // Dismiss modal — generation continues in background
+                  setGenerating(false)
+                  setDone(false)
+                  setPrompt("")
+                  setSubmittedPrompt("")
+                }}
+                className="px-5 py-2 text-sm font-medium rounded-lg border border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20 transition-all"
+              >
+                Dismiss — will appear in examples when ready
+              </button>
+              <button
+                onClick={() => {
+                  cleanupRef.current?.()
+                  handleReset()
+                }}
+                className="px-5 py-2 text-sm font-medium rounded-lg border border-white/10 text-muted-foreground hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/5 transition-all"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Generation Result — inline */}
-      {(generating || done) && (
+      {done && (
         <section
           ref={resultRef}
           className="max-w-4xl mx-auto px-6 py-12"
@@ -476,39 +519,8 @@ export default function HomePage() {
             <p className="text-foreground">{submittedPrompt}</p>
           </div>
 
-          {/* Progress or Sphere */}
-          {!done ? (
-            <div className="flex flex-col items-center justify-center min-h-[200px] gap-4 py-8">
-              <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-              <p className="text-sm text-muted-foreground">{label || "Generating..."}</p>
-              <p className="text-xs text-muted-foreground/50">{pct}% complete</p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    // Dismiss inline progress — generation continues in background
-                    // Add to jobs list so user can track it
-                    setGenerating(false)
-                    setDone(false)
-                    setPrompt("")
-                    setSubmittedPrompt("")
-                  }}
-                  className="px-4 py-1.5 text-xs font-medium rounded-lg border border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20 transition-all"
-                >
-                  Dismiss — will appear in examples when ready
-                </button>
-                <button
-                  onClick={() => {
-                    cleanupRef.current?.()
-                    handleReset()
-                  }}
-                  className="px-4 py-1.5 text-xs font-medium rounded-lg border border-white/10 text-muted-foreground hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/5 transition-all"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-6">
+          {/* Sphere */}
+          <div className="space-y-6">
               {/* Social insights — show first if social profile was used */}
               {detectedProfile && (
                 <SocialInsights profile={detectedProfile} />
@@ -558,7 +570,6 @@ export default function HomePage() {
                 <SphereSpecViewer spec={spec} bgPrompt={bgPrompt} />
               )}
             </div>
-          )}
         </section>
       )}
 
