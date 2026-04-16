@@ -443,6 +443,32 @@ async def scrape_brand_images(brand: str) -> list[bytes]:
                 if images:
                     return images
 
+    # YouTube search — handles typos, alternate names, etc.
+    # This is the most resilient source because YouTube search is fuzzy
+    from profile_scraper import search_youtube_handle, scrape_youtube_channel
+    print(f"  Trying YouTube search for '{brand}'...")
+    # Convert slug back to searchable name (marquesBrownlee → marques brownlee)
+    import re as _re
+    search_name = _re.sub(r'([a-z])([A-Z])', r'\1 \2', brand)
+    search_name = search_name.replace("_", " ").replace(".", " ")
+    yt_handle = await search_youtube_handle(search_name)
+    if yt_handle:
+        yt_data = await scrape_youtube_channel(yt_handle)
+        if yt_data and yt_data.videos:
+            from profile_scraper import download_thumbnails
+            images = await download_thumbnails(yt_data.videos)
+            if images:
+                print(f"  YouTube search found {len(images)} thumbnails via @{yt_handle}")
+                return images
+
+    # Google Images search — last resort, scrape image results
+    print(f"  Trying Google Images for '{search_name}'...")
+    google_url = f"https://www.google.com/search?q={search_name.replace(' ', '+')}&tbm=isch"
+    images = await scrape_images_from_url(google_url)
+    if images:
+        print(f"  Google Images found {len(images)} images")
+        return images
+
     return []
 
 
