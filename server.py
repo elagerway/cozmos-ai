@@ -1018,11 +1018,14 @@ async def generate_about_me(body: dict):
             environment = loop.run_until_complete(
                 generate_sphere_from_prompt(blockade_prompt, on_progress=on_env_progress)
             )
-            update("compose", 55, "Environment ready")
+            update("compose", 55, "Environment ready, analyzing scene...")
 
-            # For About Me spheres, keep the environment clean — content is
-            # displayed via interactive markers (TV screens, picture frames)
-            # instead of compositing flat images onto the panorama
+            # Analyze the scene to find TV screens and picture frames
+            from scene_analyzer import detect_scene_elements, assign_content_to_positions
+            env_jpg = environment.resize(4096 / environment.width, kernel=pyvips.enums.Kernel.LANCZOS3, vscale=2048 / environment.height).write_to_buffer(".jpg[Q=80]")
+            scene_elements = loop.run_until_complete(detect_scene_elements(env_jpg))
+            update("compose", 62, f"Found {len(scene_elements)} display surfaces")
+
             canvas = environment
 
             loop.close()
@@ -1037,8 +1040,40 @@ async def generate_about_me(body: dict):
             generate_tiles(canvas, gen_id, on_progress=on_tile_progress)
             update("tiles", 95, "Tiles generated")
 
-            # Step 5: Build markers
-            markers = build_markers(profile)
+            # Step 5: Build markers — use detected scene positions if available
+            if scene_elements:
+                # Build video data list
+                video_data = []
+                if profile.youtube:
+                    for v in profile.youtube.videos[:6]:
+                        video_data.append({
+                            "video_id": v.id,
+                            "title": v.title,
+                            "thumbnail_url": v.thumbnail_url,
+                            "view_count": v.view_count,
+                            "url": v.url,
+                        })
+                # Build image URLs
+                ig_images = profile.instagram.post_images[:4] if profile.instagram else []
+                # Build profile data
+                profile_data = {
+                    "name": profile.name,
+                    "handle": profile.handle,
+                    "bio": (profile.bio or "")[:200],
+                    "profile_image": profile.profile_image_url,
+                    "subscriber_count": profile.youtube.subscriber_count if profile.youtube else "",
+                    "twitter_handle": profile.twitter.handle if profile.twitter else "",
+                    "instagram_handle": profile.instagram.handle if profile.instagram else "",
+                    "instagram_followers": profile.instagram.follower_count if profile.instagram else 0,
+                    "tiktok_handle": profile.tiktok.handle if profile.tiktok else "",
+                    "tiktok_followers": profile.tiktok.follower_count if profile.tiktok else "",
+                    "channel_url": profile.youtube.channel_url if profile.youtube else "",
+                }
+                markers = assign_content_to_positions(scene_elements, video_data, ig_images, profile_data)
+                print(f"  Markers from scene analysis: {len(markers)}")
+            else:
+                # Fallback to hardcoded positions
+                markers = build_markers(profile)
 
             # Step 6: Save
             update("save", 96, "Saving to cloud...")
