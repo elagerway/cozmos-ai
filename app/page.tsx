@@ -524,6 +524,17 @@ export default function HomePage() {
               >
                 {genError ? "Close" : "Dismiss"}
               </button>
+              {!genError && (
+                <button
+                  onClick={() => {
+                    cleanupRef.current?.()
+                    handleReset()
+                  }}
+                  className="px-5 py-2 text-sm font-medium rounded-lg border border-white/10 text-muted-foreground hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/5 transition-all whitespace-nowrap"
+                >
+                  Cancel
+                </button>
+              )}
             </div>
           </div>
         </div>
