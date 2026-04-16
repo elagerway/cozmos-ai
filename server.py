@@ -725,6 +725,25 @@ def save_generation_record(gen_id: str, data: dict):
         print(f"  DB save failed: {resp.status_code} {resp.text[:200]}")
 
 
+def update_generation_status(gen_id: str, data: dict):
+    """Update an existing generation record in Supabase."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return
+    import requests
+    resp = requests.patch(
+        f"{SUPABASE_URL}/rest/v1/generations?id=eq.{gen_id}",
+        headers={
+            "apikey": SUPABASE_SERVICE_KEY,
+            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        },
+        json=data,
+    )
+    if resp.status_code not in (200, 204):
+        print(f"  DB update failed: {resp.status_code} {resp.text[:200]}")
+
+
 def generate_tiles(canvas: pyvips.Image, sphere_id: str, upload: bool = True, on_progress=None) -> str:
     """Generate tile pyramid and optionally upload to Supabase Storage."""
     sphere_tiles_dir = TILES_DIR / sphere_id
@@ -797,6 +816,7 @@ def run_pipeline(gen_id: str, brand: str, source_url: str = ""):
 
         if not raw_images:
             generations[gen_id].update({"status": "failed", "error": "No images found"})
+            update_generation_status(gen_id, {"status": "failed", "error": "No images found"})
             loop.close()
             return
 
@@ -895,7 +915,7 @@ def run_pipeline(gen_id: str, brand: str, source_url: str = ""):
             tile_base_url = ""
             image_url = f"/spheres/{gen_id}.jpg"
 
-        save_generation_record(gen_id, {
+        update_generation_status(gen_id, {
             "brand": brand,
             "prompt": generations[gen_id].get("prompt", ""),
             "status": "done",
@@ -928,6 +948,7 @@ def run_pipeline(gen_id: str, brand: str, source_url: str = ""):
         import traceback
         traceback.print_exc()
         generations[gen_id].update({"status": "failed", "error": str(e)})
+        update_generation_status(gen_id, {"status": "failed", "error": str(e)})
 
 
 def extract_brand_from_prompt(prompt: str) -> tuple[str, str]:
@@ -1006,6 +1027,7 @@ async def generate_about_me(body: dict):
 
             if not profile.youtube and not profile.twitter:
                 generations[gen_id].update({"status": "failed", "error": f"Could not find profile data for {name}"})
+                update_generation_status(gen_id, {"status": "failed", "error": f"Could not find profile data for {name}"})
                 loop.close()
                 return
 
@@ -1098,7 +1120,7 @@ async def generate_about_me(body: dict):
 
             # Save with markers and profile data
             import json as json_mod
-            save_generation_record(gen_id, {
+            update_generation_status(gen_id, {
                 "brand": name.lower().replace(" ", ""),
                 "prompt": generations[gen_id].get("prompt", ""),
                 "status": "done",
@@ -1150,7 +1172,15 @@ async def generate_about_me(body: dict):
             import traceback
             traceback.print_exc()
             generations[gen_id].update({"status": "failed", "error": str(e)})
+        update_generation_status(gen_id, {"status": "failed", "error": str(e)})
 
+    # Save running state to Supabase immediately so it survives restarts
+    save_generation_record(gen_id, {
+        "prompt": prompt or f"About Me sphere for {name}",
+        "status": "running",
+        "step": "init",
+        "step_label": "Starting...",
+    })
     executor.submit(run_about_me_pipeline, gen_id, name)
     return {"id": gen_id}
 
@@ -1203,6 +1233,13 @@ async def generate(body: dict):
         "label": "Starting...",
     }
 
+    save_generation_record(gen_id, {
+        "brand": brand,
+        "prompt": prompt,
+        "status": "running",
+        "step": "init",
+        "step_label": "Starting...",
+    })
     executor.submit(run_pipeline, gen_id, brand, source_url)
     return {"id": gen_id}
 
@@ -1278,7 +1315,7 @@ async def generate_from_prompt(body: dict):
                 tile_base_url = ""
                 image_url = f"/spheres/{gen_id}.jpg"
 
-            save_generation_record(gen_id, {
+            update_generation_status(gen_id, {
                 "brand": "",
                 "prompt": prompt,
                 "status": "done",
@@ -1310,7 +1347,14 @@ async def generate_from_prompt(body: dict):
             import traceback
             traceback.print_exc()
             generations[gen_id].update({"status": "failed", "error": str(e)})
+        update_generation_status(gen_id, {"status": "failed", "error": str(e)})
 
+    save_generation_record(gen_id, {
+        "prompt": prompt,
+        "status": "running",
+        "step": "init",
+        "step_label": "Starting...",
+    })
     executor.submit(run_prompt_pipeline, gen_id, prompt)
     return {"id": gen_id}
 
@@ -1358,6 +1402,12 @@ async def generate_from_uploads(body: dict):
     def run_upload_pipeline(gen_id, raw_images):
         run_pipeline_with_images(gen_id, raw_images)
 
+    save_generation_record(gen_id, {
+        "prompt": prompt,
+        "status": "running",
+        "step": "init",
+        "step_label": "Starting...",
+    })
     executor.submit(run_upload_pipeline, gen_id, raw_images)
     return {"id": gen_id}
 
@@ -1439,7 +1489,7 @@ def run_pipeline_with_images(gen_id: str, raw_images: list[bytes]):
             tile_base_url = ""
             image_url = f"/spheres/{gen_id}.jpg"
 
-        save_generation_record(gen_id, {
+        update_generation_status(gen_id, {
             "brand": "",
             "prompt": generations[gen_id].get("prompt", ""),
             "status": "done",
@@ -1471,6 +1521,7 @@ def run_pipeline_with_images(gen_id: str, raw_images: list[bytes]):
         import traceback
         traceback.print_exc()
         generations[gen_id].update({"status": "failed", "error": str(e)})
+        update_generation_status(gen_id, {"status": "failed", "error": str(e)})
 
 
 @app.get("/status/{gen_id}")
