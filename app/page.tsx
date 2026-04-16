@@ -42,6 +42,18 @@ export default function HomePage() {
   const resultRef = useRef<HTMLDivElement>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
 
+  // Background job tracking — allows multiple concurrent generations
+  interface Job {
+    id: string
+    prompt: string
+    step: PipelineStep
+    pct: number
+    label: string
+    status: "running" | "done" | "failed"
+  }
+  const [jobs, setJobs] = useState<Job[]>([])
+  const [showJobsModal, setShowJobsModal] = useState(false)
+
   // Featured examples from localStorage
   const [featuredExamples, setFeaturedExamples] = useState<Example[]>([])
   useEffect(() => {
@@ -466,22 +478,34 @@ export default function HomePage() {
 
           {/* Progress or Sphere */}
           {!done ? (
-            <div className="flex flex-col items-center justify-center min-h-[400px] gap-6">
-              <GenerationProgress
-                currentStep={step}
-                pct={pct}
-                label={label}
-                hasSocialProfile={!!detectedProfile}
-              />
-              <button
-                onClick={() => {
-                  cleanupRef.current?.()
-                  handleReset()
-                }}
-                className="px-6 py-2 text-sm font-medium rounded-lg border border-white/10 text-muted-foreground hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/5 transition-all"
-              >
-                Cancel
-              </button>
+            <div className="flex flex-col items-center justify-center min-h-[200px] gap-4 py-8">
+              <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+              <p className="text-sm text-muted-foreground">{label || "Generating..."}</p>
+              <p className="text-xs text-muted-foreground/50">{pct}% complete</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    // Dismiss inline progress — generation continues in background
+                    // Add to jobs list so user can track it
+                    setGenerating(false)
+                    setDone(false)
+                    setPrompt("")
+                    setSubmittedPrompt("")
+                  }}
+                  className="px-4 py-1.5 text-xs font-medium rounded-lg border border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20 transition-all"
+                >
+                  Dismiss — will appear in examples when ready
+                </button>
+                <button
+                  onClick={() => {
+                    cleanupRef.current?.()
+                    handleReset()
+                  }}
+                  className="px-4 py-1.5 text-xs font-medium rounded-lg border border-white/10 text-muted-foreground hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/5 transition-all"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           ) : (
             <div className="space-y-6">
