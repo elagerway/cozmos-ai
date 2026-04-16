@@ -147,10 +147,10 @@ export default function PublicSharePage({
             <span className="text-sm text-muted-foreground">Biosphere</span>
           </Link>
           <Link
-            href="/"
+            href="/examples"
             className="text-xs text-blue-400 hover:underline"
           >
-            Create your own
+            Back to Spheres
           </Link>
         </div>
       </div>

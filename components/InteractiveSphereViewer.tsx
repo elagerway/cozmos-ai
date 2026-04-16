@@ -171,6 +171,8 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
   const viewerRef = useRef<any>(null)
   const [loading, setLoading] = useState(true)
   const [ready, setReady] = useState(false)
+  const [editMode, setEditMode] = useState(false)
+  const editModeRef = useRef(false)
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -292,6 +294,53 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
           }
         })
 
+        // Drag handling for edit mode
+        let dragMarkerEl: HTMLElement | null = null
+        let dragMarkerId: string | null = null
+
+        const onPointerDown = (e: PointerEvent) => {
+          if (!editModeRef.current) return
+          const markerEl = (e.target as HTMLElement).closest(".psv-marker") as HTMLElement
+          if (!markerEl) return
+          e.stopPropagation()
+          e.preventDefault()
+          dragMarkerEl = markerEl
+          dragMarkerId = markerEl.id?.replace("psv-marker-", "") || null
+          markerEl.style.cursor = "grabbing"
+          markerEl.style.opacity = "0.7"
+          markerEl.setPointerCapture(e.pointerId)
+        }
+
+        const onPointerMove = (e: PointerEvent) => {
+          if (!dragMarkerEl || !dragMarkerId) return
+          e.stopPropagation()
+          e.preventDefault()
+          // Convert screen position to sphere coordinates
+          const rect = containerRef.current!.getBoundingClientRect()
+          const viewerPos = viewer.dataHelper.viewerCoordsToSphericalCoords({
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top,
+          })
+          if (viewerPos) {
+            markersPlugin.updateMarker({
+              id: dragMarkerId,
+              position: viewerPos,
+            } as any)
+          }
+        }
+
+        const onPointerUp = (e: PointerEvent) => {
+          if (!dragMarkerEl) return
+          dragMarkerEl.style.cursor = "grab"
+          dragMarkerEl.style.opacity = "1"
+          dragMarkerEl = null
+          dragMarkerId = null
+        }
+
+        containerRef.current!.addEventListener("pointerdown", onPointerDown, true)
+        containerRef.current!.addEventListener("pointermove", onPointerMove, true)
+        containerRef.current!.addEventListener("pointerup", onPointerUp, true)
+
         // Listen for Stop button clicks inside playing videos
         const observer = new MutationObserver(() => {
           document.querySelectorAll("[data-action='close']").forEach((el) => {
@@ -334,6 +383,31 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
             <span className="text-sm text-white/70">Rendering interactive sphere...</span>
           </div>
         </div>
+      )}
+      {/* Edit mode toggle */}
+      {!loading && markers.length > 0 && (
+        <button
+          onClick={() => {
+            const next = !editMode
+            setEditMode(next)
+            editModeRef.current = next
+            // Toggle draggable class on all markers
+            document.querySelectorAll(".psv-marker").forEach((el) => {
+              if (!editMode) {
+                (el as HTMLElement).style.cursor = "grab"
+              } else {
+                (el as HTMLElement).style.cursor = ""
+              }
+            })
+          }}
+          className={`absolute top-3 left-3 z-20 px-3 py-1.5 text-xs rounded-lg backdrop-blur-sm transition-all ${
+            editMode
+              ? "bg-blue-500/80 text-white border border-blue-400/50"
+              : "bg-black/40 text-white/50 border border-white/10 hover:text-white/80"
+          }`}
+        >
+          {editMode ? "Done Editing" : "Edit Layout"}
+        </button>
       )}
     </div>
   )
