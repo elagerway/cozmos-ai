@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -24,6 +25,7 @@ import { PipelineStep, SphereSpec } from "@/lib/types"
 import { fetchGenerations, GenerationRow } from "@/lib/supabase"
 
 export default function HomePage() {
+  const router = useRouter()
   const [prompt, setPrompt] = useState("")
 
   // Generation state
@@ -168,17 +170,8 @@ export default function HomePage() {
 
             if (status.status === "done") {
               clearInterval(poll)
-              setStep("done")
-              setImageUrl(status.image_url || null)
-              setTileStem(status.tile_stem || null)
-              setTileBaseUrl(status.tile_base_url || null)
-              setDurationS(status.duration_s || 52)
-              setSpec(getRandomSpec())
-              setBgPrompt(
-                `360° sphere composed from ${status.image_count || 12} images${handle ? ` scraped from @${handle}'s web presence` : sourceUrl ? ` scraped from ${sourceUrl}` : ""}, AI-upscaled to 16K resolution.`
-              )
-              setDone(true)
-              setGenerating(false)
+              // Navigate directly to the sphere
+              router.push(`/g/${genId}`)
             } else if (status.status === "failed") {
               clearInterval(poll)
               setGenError(status.error || "Generation failed")
