@@ -387,7 +387,7 @@ export default function HomePage() {
   const allSampleBriefs = [...SOCIAL_SAMPLE_BRIEFS.slice(0, 3), ...SAMPLE_BRIEFS.slice(0, 2)]
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen flex flex-col">
       {/* Nav */}
       <nav className="border-b border-white/5 sticky top-0 z-50 bg-background/80 backdrop-blur-xl">
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
@@ -625,11 +625,11 @@ export default function HomePage() {
         </>
       )}
 
-      {/* Footer */}
-      <footer className="border-t border-white/5 py-8">
+      {/* Footer — pinned to bottom of viewport */}
+      <footer className="mt-auto border-t border-white/5 py-4">
         <div className="max-w-6xl mx-auto px-6 flex items-center justify-between text-xs text-muted-foreground">
           <span>Biosphere &copy; 2026</span>
-          <span className="font-mono text-[10px] text-muted-foreground/40">{process.env.NEXT_PUBLIC_COMMIT_HASH}</span>
+          <span className="font-mono text-[10px] text-muted-foreground/30">{process.env.NEXT_PUBLIC_COMMIT_HASH}</span>
         </div>
       </footer>
     </div>

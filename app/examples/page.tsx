@@ -20,13 +20,13 @@ export default function ExamplesPage() {
   const [featuredIds, setFeaturedIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
-    // Load generated spheres from Supabase and merge with hardcoded examples
-    fetchGenerations().then((rows) => {
+    // Load generated spheres from Supabase (including running ones)
+    fetchGenerations(true).then((rows) => {
       const generated: Example[] = rows.map((r: GenerationRow) => ({
         id: r.id,
         prompt: r.prompt,
-        status: "done" as const,
-        step: "done" as const,
+        status: (r.status || "done") as any,
+        step: (r.step || "done") as any,
         step_label: r.step_label,
         sphere_spec: null,
         bg_prompt: null,
@@ -181,12 +181,19 @@ export default function ExamplesPage() {
           ))}
           {allExamples.map((example) => {
             const isFeatured = featuredIds.has(example.id)
+            const isRunning = example.status === "running"
             return (
               <div
                 key={example.id}
-                className="rounded-xl overflow-hidden border border-white/10 bg-white/[0.02]"
+                className={`rounded-xl overflow-hidden border ${isRunning ? "border-blue-500/20 bg-blue-500/5" : "border-white/10 bg-white/[0.02]"}`}
               >
-                {/* Thumbnail */}
+                {/* Thumbnail or spinner */}
+                {isRunning ? (
+                  <div className="aspect-[2/1] flex flex-col items-center justify-center gap-3">
+                    <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-xs text-blue-300">Generating...</span>
+                  </div>
+                ) : (
                 <Link
                   href={`/g/${example.id}`}
                   className="block relative aspect-[2/1] overflow-hidden group"
@@ -205,6 +212,7 @@ export default function ExamplesPage() {
                     </div>
                   )}
                 </Link>
+                )}
 
                 {/* Info + controls */}
                 <div className="p-4">

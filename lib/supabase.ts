@@ -40,13 +40,20 @@ export async function deleteGeneration(id: string): Promise<boolean> {
   return true
 }
 
-export async function fetchGenerations(): Promise<GenerationRow[]> {
+export async function fetchGenerations(includeRunning: boolean = false): Promise<GenerationRow[]> {
   if (!supabase) return []
-  const { data, error } = await supabase
+  let query = supabase
     .from("generations")
     .select("*")
-    .eq("status", "done")
     .order("created_at", { ascending: false })
+
+  if (includeRunning) {
+    query = query.in("status", ["done", "running"])
+  } else {
+    query = query.eq("status", "done")
+  }
+
+  const { data, error } = await query
   if (error) {
     console.error("Failed to fetch generations:", error)
     return []
