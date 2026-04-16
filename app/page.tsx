@@ -403,7 +403,7 @@ export default function HomePage() {
             href="/examples"
             className="text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
-            View Examples
+            View Spheres
           </Link>
         </div>
       </nav>
@@ -592,17 +592,9 @@ export default function HomePage() {
       )}
 
       {/* Sample Spheres Gallery — only show when not generating */}
-      {!generating && !done && (
+      {!generating && !done && featuredExamples.length > 0 && (
         <>
-          {/* Sample Spheres Gallery */}
           <section className="max-w-6xl mx-auto px-6 py-20">
-            <h2 className="text-2xl font-bold text-center mb-4">
-              Sample Generations
-            </h2>
-            <p className="text-center text-muted-foreground mb-12 max-w-xl mx-auto">
-              Each sphere was generated from a single sentence brief. Click to
-              explore in 360°.
-            </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {featuredExamples.map((gen) => (
                 <Link
