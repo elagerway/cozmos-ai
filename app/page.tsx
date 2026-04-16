@@ -39,6 +39,7 @@ export default function HomePage() {
   const [detectedProfile, setDetectedProfile] = useState<SocialProfile | null>(null)
   const [lowResWarning, setLowResWarning] = useState(false)
   const [activeGenId, setActiveGenId] = useState<string | null>(null)
+  const [genError, setGenError] = useState<string | null>(null)
 
   const resultRef = useRef<HTMLDivElement>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
@@ -116,6 +117,7 @@ export default function HomePage() {
     setImageUrl(null)
     setTileStem(null)
     setLowResWarning(false)
+    setGenError(null)
     setSpec(null)
     setBgPrompt(null)
     setStep("scan_profile")
@@ -179,8 +181,7 @@ export default function HomePage() {
               setGenerating(false)
             } else if (status.status === "failed") {
               clearInterval(poll)
-              setLabel(`Error: ${status.error}`)
-              setGenerating(false)
+              setGenError(status.error || "Generation failed")
             }
           } catch {
             pollFailures++
@@ -224,6 +225,7 @@ export default function HomePage() {
     setTileStem(null)
     setTileBaseUrl(null)
     setLowResWarning(false)
+    setGenError(null)
     setSpec(null)
     setBgPrompt(null)
     setPrompt("")
@@ -244,6 +246,7 @@ export default function HomePage() {
     setTileStem(null)
     setTileBaseUrl(null)
     setLowResWarning(false)
+    setGenError(null)
     setSpec(null)
     setBgPrompt(null)
     setStep("scan_profile")
@@ -325,6 +328,7 @@ export default function HomePage() {
     setTileStem(null)
     setTileBaseUrl(null)
     setLowResWarning(false)
+    setGenError(null)
     setSpec(null)
     setBgPrompt(null)
     setStep("scan_profile")
@@ -465,7 +469,7 @@ export default function HomePage() {
       </section>
 
       {/* Generation Progress Modal — any close action dismisses to background */}
-      {generating && !done && (
+      {(generating || genError) && !done && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
           onClick={() => {
@@ -477,6 +481,7 @@ export default function HomePage() {
             }
             setGenerating(false)
             setDone(false)
+            setGenError(null)
             setPrompt("")
             setSubmittedPrompt("")
           }}
@@ -487,15 +492,22 @@ export default function HomePage() {
               <p className="text-foreground text-sm">{submittedPrompt}</p>
             </div>
 
-            <GenerationProgress
-              currentStep={step}
-              pct={pct}
-              label={label}
-              hasSocialProfile={!!detectedProfile}
-            />
+            {genError ? (
+              <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-4">
+                <p className="text-sm text-red-300 font-medium">Generation failed</p>
+                <p className="text-sm text-red-300/70 mt-1">{genError}</p>
+              </div>
+            ) : (
+              <GenerationProgress
+                currentStep={step}
+                pct={pct}
+                label={label}
+                hasSocialProfile={!!detectedProfile}
+              />
+            )}
 
             <div className="flex gap-3 justify-between items-center pt-2">
-              <p className="text-[11px] text-muted-foreground/50">Close this modal anytime — your sphere will appear in examples when ready</p>
+              <p className="text-[11px] text-muted-foreground/50">{genError ? "Try again with a different prompt" : "Close this modal anytime — your sphere will appear in examples when ready"}</p>
               <button
                 onClick={() => {
                   if (activeGenId) {
@@ -505,12 +517,13 @@ export default function HomePage() {
                   }
                   setGenerating(false)
                   setDone(false)
+                  setGenError(null)
                   setPrompt("")
                   setSubmittedPrompt("")
                 }}
                 className="px-5 py-2 text-sm font-medium rounded-lg border border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20 transition-all whitespace-nowrap"
               >
-                Dismiss
+                {genError ? "Close" : "Dismiss"}
               </button>
             </div>
           </div>
