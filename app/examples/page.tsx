@@ -152,9 +152,14 @@ export default function ExamplesPage() {
                 >
                   {example.image_url && (
                     <img
-                      src={example.image_url}
+                      src={
+                        example.tile_base_url && example.tile_stem
+                          ? `${example.tile_base_url}/${example.tile_stem}_thumb.jpg`
+                          : example.image_url
+                      }
                       alt={example.sphere_spec?.campaign_name || "Sphere"}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                      loading="lazy"
                     />
                   )}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />

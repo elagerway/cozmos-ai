@@ -621,9 +621,14 @@ export default function HomePage() {
                 >
                   {gen.image_url && (
                     <img
-                      src={gen.image_url}
+                      src={
+                        (gen as any).tile_base_url && (gen as any).tile_stem
+                          ? `${(gen as any).tile_base_url}/${(gen as any).tile_stem}_thumb.jpg`
+                          : gen.image_url
+                      }
                       alt={gen.sphere_spec?.campaign_name || "Sphere"}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                      loading="lazy"
                     />
                   )}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />

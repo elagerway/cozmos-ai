@@ -183,6 +183,22 @@ export default function PublicSharePage({
                     tileStem={viewData.tile_stem}
                     tileBaseUrl={viewData.tile_base_url}
                     markers={viewData.markers}
+                    onMarkersChanged={async (updatedMarkers) => {
+                      // Save updated positions to Supabase. Persist the raw
+                      // brand as profile.name — NOT viewData.title, which is
+                      // already decorated ("<brand> — Generated Sphere") and
+                      // would re-append the suffix on every reload.
+                      if (supabase) {
+                        const envData = { markers: updatedMarkers, profile: viewData.brand ? { name: viewData.brand } : undefined }
+                        const { error } = await supabase
+                          .from("generations")
+                          .update({ environment: JSON.stringify(envData) })
+                          .eq("id", id)
+                        if (error) console.error("Failed to save markers:", error)
+                        else console.log("Markers saved to Supabase")
+                      }
+                      setViewData({ ...viewData, markers: updatedMarkers })
+                    }}
                   />
                 ) : (
                   <SphereViewer
@@ -195,7 +211,7 @@ export default function PublicSharePage({
                 {!isFullscreen && (
                   <button
                     onClick={() => setShowDeleteModal(true)}
-                    className="absolute top-3 right-3 z-20 w-8 h-8 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 hover:bg-red-500/80 text-white/60 hover:text-white backdrop-blur-sm"
+                    className="absolute top-3 right-24 z-20 w-8 h-8 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 hover:bg-red-500/80 text-white/60 hover:text-white backdrop-blur-sm"
                     title="Delete sphere"
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

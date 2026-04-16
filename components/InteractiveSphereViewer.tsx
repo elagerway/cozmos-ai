@@ -1,8 +1,10 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import "@photo-sphere-viewer/core/index.css"
 import "@photo-sphere-viewer/markers-plugin/index.css"
+import { AddMarkerModal } from "./AddMarkerModal"
 
 interface VideoMarkerData {
   video_id: string
@@ -10,6 +12,7 @@ interface VideoMarkerData {
   thumbnail_url: string
   view_count: string
   url: string
+  platform?: "youtube" | "vimeo"
 }
 
 interface ProfileMarkerData {
@@ -22,12 +25,31 @@ interface ProfileMarkerData {
   channel_url: string
 }
 
+interface AudioMarkerData {
+  url: string
+  title: string
+  artist?: string
+  cover_url?: string
+}
+
+interface BioLink {
+  emoji: string
+  title: string
+  url: string
+}
+
+interface BioLinksMarkerData {
+  title: string
+  links: BioLink[]
+}
+
 interface MarkerDef {
-  type: "video" | "profile" | "image"
+  type: "video" | "profile" | "image" | "audio" | "bio-links"
   yaw: number
   pitch: number
-  scene_width?: number
-  data: VideoMarkerData | ProfileMarkerData | any
+  scene_width?: number     // designed base width used to render HTML
+  scene_scale?: number     // user-applied uniform scale multiplier (1 = default)
+  data: VideoMarkerData | ProfileMarkerData | AudioMarkerData | BioLinksMarkerData | any
 }
 
 interface Props {
@@ -35,6 +57,7 @@ interface Props {
   tileStem?: string | null
   tileBaseUrl?: string | null
   markers?: MarkerDef[]
+  onMarkersChanged?: (markers: MarkerDef[]) => void | Promise<void>
 }
 
 const LEVELS = [
@@ -44,8 +67,27 @@ const LEVELS = [
   { width: 16384, cols: 16, rows: 8 },
 ]
 
-function ProfileCardHTML(data: ProfileMarkerData): string {
+// Escape helpers — marker HTML goes straight into PSV's innerHTML, so every
+// string interpolated from scraped/user input must pass through these to
+// prevent XSS via `<script>`, quote breakouts, or `javascript:` URIs.
+function escapeHtml(s: unknown): string {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string))
+}
+function safeUrl(u: unknown): string {
+  const raw = String(u ?? "").trim()
+  return /^(https?:|\/|#)/i.test(raw) ? escapeHtml(raw) : "#"
+}
+
+function ProfileCardHTML(data: ProfileMarkerData, width: number = 320): string {
   // Wall-mounted display panel — sharp, solid, like a kiosk in the room
+  const name = escapeHtml(data.name)
+  const handle = escapeHtml(data.handle)
+  const bio = escapeHtml((data.bio || "").slice(0, 160))
+  const bioDots = (data.bio || "").length > 160 ? "..." : ""
+  const subs = escapeHtml(data.subscriber_count)
+  const tw = escapeHtml(data.twitter_handle)
+  const ig = escapeHtml((data as any).instagram_handle)
+  const tt = escapeHtml((data as any).tiktok_handle)
   return `
     <div style="
       background: linear-gradient(180deg, #0d0d0d 0%, #151515 100%);
@@ -53,27 +95,27 @@ function ProfileCardHTML(data: ProfileMarkerData): string {
       border-left: 4px solid rgba(59,130,246,0.6);
       border-radius: 4px;
       padding: 28px 28px 24px;
-      width: 320px;
+      width: ${width}px;
       color: white;
       font-family: Inter, system-ui, sans-serif;
       cursor: default;
       box-shadow: 0 20px 40px rgba(0,0,0,0.8);
     ">
       <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;">
-        ${data.profile_image ? `<img src="${data.profile_image}" style="width:80px;height:80px;border-radius:8px;border:2px solid rgba(255,255,255,0.1);object-fit:cover;" />` : ""}
+        ${data.profile_image ? `<img src="${safeUrl(data.profile_image)}" style="width:80px;height:80px;border-radius:8px;border:2px solid rgba(255,255,255,0.1);object-fit:cover;" />` : ""}
         <div>
-          <div style="font-size:22px;font-weight:800;letter-spacing:-0.02em;">${data.name}</div>
-          <div style="font-size:13px;color:rgba(255,255,255,0.35);margin-top:3px;">${data.handle}</div>
+          <div style="font-size:22px;font-weight:800;letter-spacing:-0.02em;">${name}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.35);margin-top:3px;">${handle}</div>
         </div>
       </div>
-      ${data.bio ? `<p style="font-size:13px;color:rgba(255,255,255,0.55);line-height:1.6;margin:0 0 16px 0;">${data.bio.slice(0, 160)}${data.bio.length > 160 ? "..." : ""}</p>` : ""}
+      ${bio ? `<p style="font-size:13px;color:rgba(255,255,255,0.55);line-height:1.6;margin:0 0 16px 0;">${bio}${bioDots}</p>` : ""}
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;">
-        ${data.subscriber_count ? `<span style="padding:4px 10px;border-radius:3px;background:rgba(255,0,0,0.12);font-size:11px;color:rgba(255,100,100,0.9);">YT ${data.subscriber_count}</span>` : ""}
-        ${(data as any).instagram_handle ? `<span style="padding:4px 10px;border-radius:3px;background:rgba(225,48,108,0.12);font-size:11px;color:rgba(225,130,170,0.9);">IG @${(data as any).instagram_handle}</span>` : ""}
-        ${data.twitter_handle ? `<span style="padding:4px 10px;border-radius:3px;background:rgba(29,155,240,0.12);font-size:11px;color:rgba(100,180,240,0.9);">X @${data.twitter_handle}</span>` : ""}
-        ${(data as any).tiktok_handle ? `<span style="padding:4px 10px;border-radius:3px;background:rgba(0,242,234,0.08);font-size:11px;color:rgba(100,242,234,0.9);">TT @${(data as any).tiktok_handle}</span>` : ""}
+        ${subs ? `<span style="padding:4px 10px;border-radius:3px;background:rgba(255,0,0,0.12);font-size:11px;color:rgba(255,100,100,0.9);">YT ${subs}</span>` : ""}
+        ${ig ? `<span style="padding:4px 10px;border-radius:3px;background:rgba(225,48,108,0.12);font-size:11px;color:rgba(225,130,170,0.9);">IG @${ig}</span>` : ""}
+        ${tw ? `<span style="padding:4px 10px;border-radius:3px;background:rgba(29,155,240,0.12);font-size:11px;color:rgba(100,180,240,0.9);">X @${tw}</span>` : ""}
+        ${tt ? `<span style="padding:4px 10px;border-radius:3px;background:rgba(0,242,234,0.08);font-size:11px;color:rgba(100,242,234,0.9);">TT @${tt}</span>` : ""}
       </div>
-      ${data.channel_url ? `<a href="${data.channel_url}" target="_blank" rel="noopener" style="
+      ${data.channel_url ? `<a href="${safeUrl(data.channel_url)}" target="_blank" rel="noopener" style="
         display:inline-block;padding:10px 24px;
         background:#1a1a1a;border:1px solid rgba(255,255,255,0.1);
         border-radius:4px;
@@ -85,8 +127,11 @@ function ProfileCardHTML(data: ProfileMarkerData): string {
 
 function VideoThumbnailHTML(data: VideoMarkerData, width: number = 360): string {
   // Wall-mounted TV — thick bezel, screen glow, realistic proportions
+  const videoId = escapeHtml(data.video_id)
+  const title = escapeHtml(data.title)
+  const viewCount = escapeHtml(data.view_count)
   return `
-    <div data-video-id="${data.video_id}" data-mode="thumbnail" style="
+    <div data-video-id="${videoId}" data-mode="thumbnail" style="
       background: #080808;
       border: 12px solid #111;
       border-bottom: 18px solid #111;
@@ -99,7 +144,7 @@ function VideoThumbnailHTML(data: VideoMarkerData, width: number = 360): string 
       box-shadow: 0 15px 40px rgba(0,0,0,0.9);
     ">
       <div style="position:relative;box-shadow:inset 0 0 30px rgba(100,150,255,0.06);">
-        <img src="${data.thumbnail_url}" style="width:100%;aspect-ratio:16/9;object-fit:cover;display:block;" />
+        <img src="${safeUrl(data.thumbnail_url)}" style="width:100%;aspect-ratio:16/9;object-fit:cover;display:block;" />
         <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.15);">
           <div style="width:72px;height:72px;border-radius:50%;background:rgba(255,0,0,0.85);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 25px rgba(255,0,0,0.5);transition:transform 0.2s;"
                onmouseenter="this.style.transform='scale(1.15)'" onmouseleave="this.style.transform='scale(1)'">
@@ -108,17 +153,26 @@ function VideoThumbnailHTML(data: VideoMarkerData, width: number = 360): string 
         </div>
       </div>
       <div style="padding:10px 14px;background:#0a0a0a;">
-        <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${data.title}</div>
-        ${data.view_count ? `<div style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:3px;">${data.view_count}</div>` : ""}
+        <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</div>
+        ${viewCount ? `<div style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:3px;">${viewCount}</div>` : ""}
       </div>
     </div>
   `
 }
 
 function VideoPlayingHTML(data: VideoMarkerData, width: number = 360): string {
-  // TV screen with YouTube iframe — same bezel styling, seamless transition
+  // TV screen with YouTube or Vimeo iframe — same bezel styling, seamless transition
+  // Only allow video IDs that match the platform's expected format — defense-in-depth
+  // against crafted IDs that could break out of the src attribute.
+  const ytId = /^[A-Za-z0-9_-]{11}$/.test(data.video_id || "") ? data.video_id : ""
+  const vimeoId = /^\d+$/.test(data.video_id || "") ? data.video_id : ""
+  const embedSrc = data.platform === "vimeo"
+    ? `https://player.vimeo.com/video/${vimeoId}?autoplay=1&title=0&byline=0&portrait=0`
+    : `https://www.youtube.com/embed/${ytId}?autoplay=1&rel=0&modestbranding=1`
+  const videoId = escapeHtml(data.video_id)
+  const title = escapeHtml(data.title)
   return `
-    <div data-video-id="${data.video_id}" data-mode="playing" style="
+    <div data-video-id="${videoId}" data-mode="playing" style="
       background: #000;
       border: 12px solid #111;
       border-bottom: 18px solid #111;
@@ -131,14 +185,14 @@ function VideoPlayingHTML(data: VideoMarkerData, width: number = 360): string {
     ">
       <div style="position:relative;width:100%;padding-bottom:56.25%;">
         <iframe
-          src="https://www.youtube.com/embed/${data.video_id}?autoplay=1&rel=0&modestbranding=1"
+          src="${embedSrc}"
           style="position:absolute;inset:0;width:100%;height:100%;border:0;"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           allowfullscreen
         ></iframe>
       </div>
       <div style="padding:8px 14px;background:#0a0a0a;display:flex;justify-content:space-between;align-items:center;">
-        <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;">${data.title}</div>
+        <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;">${title}</div>
         <button onclick="this.closest('[data-video-id]').setAttribute('data-action','close')" style="
           margin-left:10px;padding:5px 14px;border-radius:3px;border:1px solid rgba(255,255,255,0.1);
           background:#1a1a1a;color:rgba(255,255,255,0.5);font-size:11px;cursor:pointer;white-space:nowrap;
@@ -148,7 +202,7 @@ function VideoPlayingHTML(data: VideoMarkerData, width: number = 360): string {
   `
 }
 
-function ImageFrameHTML(data: { image_url: string; source: string }): string {
+function ImageFrameHTML(data: { image_url: string; source: string }, width: number = 160): string {
   // Wall-mounted picture frame — wooden frame, off-white matte, realistic shadow
   return `
     <div style="
@@ -156,26 +210,140 @@ function ImageFrameHTML(data: { image_url: string; source: string }): string {
       padding: 14px;
       border-radius: 2px;
       box-shadow: 0 8px 25px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,255,255,0.06);
-      width: 160px;
+      width: ${width}px;
       cursor: default;
     ">
       <div style="border:6px solid #f0ebe0;border-radius:1px;overflow:hidden;box-shadow:inset 0 0 10px rgba(0,0,0,0.15);">
-        <img src="${data.image_url}" style="width:100%;aspect-ratio:4/5;object-fit:cover;display:block;" />
+        <img src="${safeUrl(data.image_url)}" style="width:100%;aspect-ratio:4/5;object-fit:cover;display:block;" />
       </div>
     </div>
   `
 }
 
-export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, markers = [] }: Props) {
+function AudioPlayerHTML(data: AudioMarkerData, width: number = 280): string {
+  // Speaker-style audio card with built-in HTML5 player
+  const title = escapeHtml(data.title || "Audio")
+  const artist = data.artist ? escapeHtml(data.artist) : ""
+  return `
+    <div data-audio-url="${safeUrl(data.url)}" style="
+      background: linear-gradient(160deg, #1a1a1a, #0a0a0a);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      padding: 18px 18px 14px;
+      width: ${width}px;
+      color: white;
+      font-family: Inter, system-ui, sans-serif;
+      box-shadow: 0 15px 40px rgba(0,0,0,0.85), inset 0 1px 0 rgba(255,255,255,0.04);
+    ">
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">
+        <div style="width:54px;height:54px;border-radius:50%;background:radial-gradient(circle at 50% 50%, #333 0%, #111 60%, #050505 100%);border:3px solid #0a0a0a;box-shadow:0 2px 6px rgba(0,0,0,0.8),inset 0 0 0 8px #1a1a1a;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+          <div style="width:10px;height:10px;border-radius:50%;background:#ff3b30;"></div>
+        </div>
+        <div style="min-width:0;flex:1;">
+          <div style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</div>
+          ${artist ? `<div style="font-size:11px;color:rgba(255,255,255,0.45);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${artist}</div>` : ""}
+        </div>
+      </div>
+      <audio controls preload="none" src="${safeUrl(data.url)}" style="width:100%;height:32px;filter:invert(0.92) hue-rotate(180deg);"></audio>
+    </div>
+  `
+}
+
+function BioLinksHTML(data: BioLinksMarkerData, width: number = 300): string {
+  const title = escapeHtml(data.title || "Links")
+  const rows = (data.links || []).map((l) => `
+    <a href="${safeUrl(l.url)}" target="_blank" rel="noopener noreferrer" style="
+      display:flex;align-items:center;gap:12px;
+      padding:12px 14px;
+      background:rgba(255,255,255,0.04);
+      border:1px solid rgba(255,255,255,0.08);
+      border-radius:10px;
+      color:white;text-decoration:none;
+      transition:background 0.15s;
+    " onmouseenter="this.style.background='rgba(255,255,255,0.09)'" onmouseleave="this.style.background='rgba(255,255,255,0.04)'">
+      <span style="font-size:20px;flex-shrink:0;">${escapeHtml(l.emoji || "🔗")}</span>
+      <span style="font-size:13px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(l.title || l.url)}</span>
+      <span style="font-size:12px;color:rgba(255,255,255,0.35);">↗</span>
+    </a>
+  `).join("")
+  return `
+    <div style="
+      background: linear-gradient(180deg, #0d0d0d, #151515);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-left: 4px solid rgba(168,85,247,0.6);
+      border-radius: 4px;
+      padding: 20px 20px 18px;
+      width: ${width}px;
+      color: white;
+      font-family: Inter, system-ui, sans-serif;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.8);
+    ">
+      <div style="font-size:15px;font-weight:700;margin-bottom:14px;letter-spacing:-0.01em;">${title}</div>
+      <div style="display:flex;flex-direction:column;gap:8px;">${rows}</div>
+    </div>
+  `
+}
+
+export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, markers = [], onMarkersChanged }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<any>(null)
   const [loading, setLoading] = useState(true)
   const [ready, setReady] = useState(false)
   const [editMode, setEditMode] = useState(false)
   const editModeRef = useRef(false)
+  const [lock360, setLock360] = useState(true)
+  const lock360Ref = useRef(true)
   const selectedMarkerRef = useRef<string | null>(null)
   const [selectedMarker, setSelectedMarker] = useState<string | null>(null)
   const markersPluginRef = useRef<any>(null)
+  const movedPositionsRef = useRef<Record<string, { yaw: number; pitch: number }>>({})
+  const resizedWidthsRef = useRef<Record<string, number>>({})     // legacy, unused for new resize flow
+  const resizedScalesRef = useRef<Record<string, number>>({})     // user-applied scale multiplier to persist
+  // Live scale multiplier applied on top of zoom/viewport scale.
+  const userScalesRef = useRef<Record<string, number>>({})
+  const [psvHost, setPsvHost] = useState<HTMLElement | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
+  // Keep the latest markers prop reachable from refs-only closures (onMarkersChanged commit).
+  const markersRef = useRef(markers)
+  useEffect(() => { markersRef.current = markers }, [markers])
+
+  const addMarkerAtCurrentView = async (builder: (yawDeg: number, pitchDeg: number) => MarkerDef) => {
+    const viewer: any = viewerRef.current
+    if (!viewer) return
+    const pos = viewer.getPosition()
+    const yawDeg = (pos.yaw * 180) / Math.PI
+    const pitchDeg = (pos.pitch * 180) / Math.PI
+    const newMarker = builder(yawDeg, pitchDeg)
+    viewer.__biosphereAddMarker?.(newMarker)
+    const updated = [...markersRef.current, newMarker]
+    markersRef.current = updated
+    if (onMarkersChanged) await onMarkersChanged(updated)
+  }
+
+  const commitMarkerChanges = async () => {
+    const hasChanges =
+      Object.keys(movedPositionsRef.current).length > 0 ||
+      Object.keys(resizedScalesRef.current).length > 0
+    if (!onMarkersChanged || !hasChanges) return
+    const updated = markersRef.current.map((m, i) => {
+      // Keep in sync with markerIdFor() inside the viewer's ready handler.
+      const id = m.type === "profile" ? "profile-card"
+        : m.type === "video" ? `video-${(m.data as VideoMarkerData).video_id}`
+        : m.type === "audio" ? `audio-${i}-${encodeURIComponent((m.data as AudioMarkerData).url || "").slice(0, 24)}`
+        : m.type === "bio-links" ? `bio-links-${i}`
+        : `image-${i}`
+      const newPos = movedPositionsRef.current[id]
+      const newScale = resizedScalesRef.current[id]
+      let next: MarkerDef = m
+      if (newPos) next = { ...next, yaw: newPos.yaw, pitch: newPos.pitch }
+      if (newScale) next = { ...next, scene_scale: newScale }
+      return next
+    })
+    await onMarkersChanged(updated)
+    movedPositionsRef.current = {}
+    resizedScalesRef.current = {}
+  }
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -208,7 +376,9 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
       // Inject styles for markers and edit mode
       const style = document.createElement("style")
       style.textContent = `
-        .psv-marker--normal { transition: transform 0.15s ease-out, opacity 0.2s; }
+        .psv-marker--normal {
+          transition: none !important;
+        }
 
         /* Edit mode: dashed border on all markers */
         .biosphere-edit-mode .psv-marker {
@@ -231,6 +401,38 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
         .biosphere-dragging .psv-canvas-container,
         .biosphere-dragging .psv-overlay {
           cursor: none !important;
+        }
+
+        /* Resize handles on selected marker */
+        .biosphere-handle {
+          position: absolute;
+          width: 14px;
+          height: 14px;
+          background: rgba(59,130,246,0.95);
+          border: 2px solid white;
+          border-radius: 50%;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+          z-index: 1000;
+          pointer-events: auto;
+        }
+        .biosphere-handle--tl { top: -7px; left: -7px; cursor: nwse-resize; }
+        .biosphere-handle--tr { top: -7px; right: -7px; cursor: nesw-resize; }
+        .biosphere-handle--bl { bottom: -7px; left: -7px; cursor: nesw-resize; }
+        .biosphere-handle--br { bottom: -7px; right: -7px; cursor: nwse-resize; }
+        /* While actively resizing: drop the selection box and ghost so the marker reads clean */
+        .biosphere-resizing .psv-marker.biosphere-selected {
+          outline: none !important;
+          opacity: 1 !important;
+        }
+        .biosphere-resizing .psv-marker.biosphere-selected .biosphere-handle {
+          background: rgba(59,130,246,1);
+        }
+        .biosphere-resizing .biosphere-ghost {
+          display: none !important;
+        }
+        .biosphere-resizing .psv-canvas-container,
+        .biosphere-resizing .psv-overlay {
+          cursor: inherit !important;
         }
 
         /* Ghost element following cursor */
@@ -265,6 +467,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
             `${base}/${level}/${col}_${row}.jpg`,
         },
         defaultZoomLvl: 50,
+        defaultPitch: 0,
         minFov: 15,
         touchmoveTwoFingers: false,
         navbar: ["zoom", "fullscreen"],
@@ -273,6 +476,52 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
         ],
       })
       viewerRef.current = viewer
+
+      // Expose psv-container to React so overlays can portal into it (visible in fullscreen).
+      setPsvHost(containerRef.current?.querySelector(".psv-container") as HTMLElement | null)
+
+      // Pitch lock — force straight ahead when 360 is off
+      viewer.addEventListener("before-rotate", (e: any) => {
+        if (!lock360Ref.current) return
+        if (e.position) {
+          e.position.pitch = 0
+        }
+      })
+
+      // Marker scaling — PSV calls the `scale` function on every render, so it
+      // stays in sync with zoom AND viewport (including fullscreen) automatically.
+      // Scales both the marker's visual and hit area, so clicks in edit mode work.
+      const defaultFov = viewer.dataHelper.zoomLevelToFov(50)
+      const psvEl = () =>
+        containerRef.current?.querySelector(".psv-container") as HTMLElement | null
+      const referenceHeight =
+        psvEl()?.clientHeight || containerRef.current.clientHeight || 600
+      const computeScale = (zoomLevel: number) => {
+        const currentFov = viewer.dataHelper.zoomLevelToFov(zoomLevel)
+        const fovScale = defaultFov / currentFov
+        const currentHeight = psvEl()?.clientHeight || referenceHeight
+        const viewportScale = currentHeight / referenceHeight
+        return fovScale * viewportScale
+      }
+
+      // Force PSV to re-render markers when viewport size changes (fullscreen/resize)
+      const refreshMarkers = () => {
+        const plugin = markersPluginRef.current
+        if (!plugin) return
+        // Trigger PSV's marker render by calling renderMarkers on the viewer
+        viewer.needsUpdate()
+      }
+      const onFullscreen = () => {
+        requestAnimationFrame(() => requestAnimationFrame(refreshMarkers))
+      }
+      viewer.addEventListener("fullscreen", onFullscreen)
+      const onResize = () => refreshMarkers()
+      window.addEventListener("resize", onResize)
+
+      ;(viewer as any).__biosphereCleanup = () => {
+        viewer.removeEventListener("fullscreen", onFullscreen)
+        window.removeEventListener("resize", onResize)
+      }
 
       viewer.addEventListener("ready", () => {
         if (destroyed) return
@@ -283,99 +532,219 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
 
         const playingVideos = new Set<string>()
 
-        for (let i = 0; i < markers.length; i++) {
-          const marker = markers[i]
-          const yawRad = (marker.yaw * Math.PI) / 180
-          const pitchRad = (marker.pitch * Math.PI) / 180
+        // Scale function factory — per-marker so resize-drag multiplier applies
+        // on top of zoom/viewport scale uniformly (width, height, fonts, hit area).
+        const makeScaleFn = (id: string) => (zoomLevel: number) =>
+          computeScale(zoomLevel) * (userScalesRef.current[id] ?? 1)
 
-          if (marker.type === "profile") {
-            markersPlugin.addMarker({
-              id: "profile-card",
-              position: { yaw: yawRad, pitch: pitchRad },
-              html: ProfileCardHTML(marker.data as ProfileMarkerData),
-              anchor: "center center",
-              data: { ...marker.data, markerType: "profile" },
-            } as any)
-          } else if (marker.type === "video") {
-            const vdata = marker.data as VideoMarkerData
-            const sceneW = marker.scene_width || 360
-            markersPlugin.addMarker({
-              id: `video-${vdata.video_id}`,
-              position: { yaw: yawRad, pitch: pitchRad },
-              html: VideoThumbnailHTML(vdata, sceneW),
-              anchor: "center center",
-              data: { ...vdata, markerType: "video", sceneWidth: sceneW },
-            } as any)
-          } else if (marker.type === "image") {
-            markersPlugin.addMarker({
-              id: `image-${i}`,
-              position: { yaw: yawRad, pitch: pitchRad },
-              html: ImageFrameHTML(marker.data as any),
-              anchor: "center center",
-            } as any)
+        // Compute a stable marker id + default design width for a MarkerDef
+        const markerIdFor = (m: MarkerDef, i: number): string => {
+          if (m.type === "profile") return "profile-card"
+          if (m.type === "video") return `video-${(m.data as VideoMarkerData).video_id}`
+          if (m.type === "audio") return `audio-${i}-${encodeURIComponent((m.data as AudioMarkerData).url || "").slice(0, 24)}`
+          if (m.type === "bio-links") return `bio-links-${i}`
+          return `image-${i}`
+        }
+        const defaultWidthFor = (t: MarkerDef["type"]) =>
+          t === "profile" ? 320 : t === "video" ? 360 : t === "image" ? 160 : t === "audio" ? 280 : 300
+
+        // Build html + PSV config for a marker
+        const buildMarkerConfig = (m: MarkerDef, i: number) => {
+          const yawRad = (m.yaw * Math.PI) / 180
+          const pitchRad = (m.pitch * Math.PI) / 180
+          const sceneW = m.scene_width || defaultWidthFor(m.type)
+          const id = markerIdFor(m, i)
+          userScalesRef.current[id] = m.scene_scale ?? 1
+          let html = ""
+          if (m.type === "profile") html = ProfileCardHTML(m.data as ProfileMarkerData, sceneW)
+          else if (m.type === "video") html = VideoThumbnailHTML(m.data as VideoMarkerData, sceneW)
+          else if (m.type === "image") html = ImageFrameHTML(m.data as any, sceneW)
+          else if (m.type === "audio") html = AudioPlayerHTML(m.data as AudioMarkerData, sceneW)
+          else if (m.type === "bio-links") html = BioLinksHTML(m.data as BioLinksMarkerData, sceneW)
+          return {
+            id,
+            position: { yaw: yawRad, pitch: pitchRad },
+            html,
+            anchor: "center center" as const,
+            scale: makeScaleFn(id),
+            data: { ...m.data, markerType: m.type, sceneWidth: sceneW },
           }
         }
 
-        // Handle marker clicks
+        for (let i = 0; i < markers.length; i++) {
+          markersPlugin.addMarker(buildMarkerConfig(markers[i], i) as any)
+        }
+
+        // Expose so the add-marker UI can inject new markers without re-init
+        ;(viewer as any).__biosphereAddMarker = (newMarker: MarkerDef) => {
+          const idx = markersRef.current.length
+          const config = buildMarkerConfig(newMarker, idx)
+          markersPlugin.addMarker(config as any)
+          return config.id
+        }
+
+        // Build new marker HTML at a given width, based on marker type
+        const rebuildMarkerHTML = (markerId: string, data: any, width: number): string | null => {
+          const origIdx = markers.findIndex((m, i) => {
+            const id = m.type === "profile" ? "profile-card"
+              : m.type === "video" ? `video-${(m.data as VideoMarkerData).video_id}`
+              : `image-${i}`
+            return id === markerId
+          })
+          if (origIdx < 0) return null
+          const orig = markers[origIdx]
+          if (orig.type === "profile") return ProfileCardHTML(orig.data as ProfileMarkerData, width)
+          if (orig.type === "video") return VideoThumbnailHTML(orig.data as VideoMarkerData, width)
+          if (orig.type === "image") return ImageFrameHTML(orig.data as any, width)
+          return null
+        }
+
+        const attachResizeHandles = (markerEl: HTMLElement, markerId: string, data: any) => {
+          markerEl.querySelectorAll(".biosphere-handle").forEach((h) => h.remove())
+          const corners: Array<{ cls: string; sx: number; sy: number }> = [
+            { cls: "biosphere-handle--tl", sx: -1, sy: -1 },
+            { cls: "biosphere-handle--tr", sx: 1, sy: -1 },
+            { cls: "biosphere-handle--bl", sx: -1, sy: 1 },
+            { cls: "biosphere-handle--br", sx: 1, sy: 1 },
+          ]
+          for (const c of corners) {
+            const h = document.createElement("div")
+            h.className = `biosphere-handle ${c.cls}`
+            h.addEventListener("click", (ev) => {
+              ev.preventDefault()
+              ev.stopPropagation()
+            })
+            h.addEventListener("mousedown", (ev) => {
+              ev.preventDefault()
+              ev.stopPropagation()
+              const startX = ev.clientX
+              const startY = ev.clientY
+              const psvC = containerRef.current?.querySelector(".psv-container")
+              psvC?.classList.add("biosphere-resizing")
+              const ghost = document.querySelector(".biosphere-ghost") as any
+              if (ghost) { ghost.__cleanup?.(); ghost.remove() }
+
+              // Work purely in scale-multiplier space so everything (width,
+              // height, padding, font sizes) grows uniformly and height can
+              // never "snap back" to content-driven layout.
+              const baseWidth = data?.sceneWidth || 320
+              const zoom = viewer.getZoomLevel()
+              const curScale = computeScale(zoom) || 1
+              const startMultiplier = userScalesRef.current[markerId] ?? 1
+              const startVisualWidth = baseWidth * curScale * startMultiplier
+
+              const onMove = (mv: MouseEvent) => {
+                const dx = (mv.clientX - startX) * c.sx
+                const dy = (mv.clientY - startY) * c.sy
+                const delta = (dx + dy) / 2
+                const newVisual = Math.max(40, startVisualWidth + delta)
+                const newMultiplier = Math.max(0.25, Math.min(4, newVisual / (baseWidth * curScale)))
+                userScalesRef.current[markerId] = newMultiplier
+                resizedScalesRef.current[markerId] = newMultiplier
+                viewer.needsUpdate()
+              }
+              const onUp = () => {
+                document.removeEventListener("mousemove", onMove)
+                document.removeEventListener("mouseup", onUp)
+                psvC?.classList.remove("biosphere-resizing")
+              }
+              document.addEventListener("mousemove", onMove)
+              document.addEventListener("mouseup", onUp)
+            })
+            markerEl.appendChild(h)
+          }
+        }
+
+        // Select a marker for editing — highlight, show resize handles, track state.
+        const selectForEdit = (markerEl: HTMLElement, markerId: string, data: any) => {
+          document.querySelectorAll(".psv-marker.biosphere-selected").forEach((el) => {
+            el.classList.remove("biosphere-selected")
+            el.querySelectorAll(".biosphere-handle").forEach((h) => h.remove())
+          })
+          markerEl.classList.add("biosphere-selected")
+          attachResizeHandles(markerEl, markerId, data)
+          selectedMarkerRef.current = markerId
+          setSelectedMarker(markerId)
+        }
+
+        // Edit-mode drag-to-move: capture mousedown before PSV so the scene
+        // doesn't rotate while the user is moving a marker.
+        const psvContainer = containerRef.current?.querySelector(".psv-container") as HTMLElement | null
+        const onEditMousedown = (ev: MouseEvent) => {
+          if (!editModeRef.current) return
+          const target = ev.target as Element
+          // Let resize handles own their own drag
+          if (target.closest(".biosphere-handle")) return
+          const markerEl = target.closest(".psv-marker") as HTMLElement | null
+          if (!markerEl) return
+
+          const markerId = markerEl.id.replace(/^psv-marker-/, "")
+          const marker = markersPlugin.markers?.[markerId]
+          if (!marker) return
+          const data = marker.config?.data
+          ev.preventDefault()
+          ev.stopPropagation()
+
+          const startX = ev.clientX
+          const startY = ev.clientY
+          let dragging = false
+          const threshold = 4
+          psvContainer?.classList.add("biosphere-dragging")
+
+          // Pre-select on mousedown so resize handles/outline appear immediately
+          selectForEdit(markerEl, markerId, data)
+
+          const onMove = (mv: MouseEvent) => {
+            if (!dragging) {
+              if (Math.hypot(mv.clientX - startX, mv.clientY - startY) < threshold) return
+              dragging = true
+            }
+            const psvEl = containerRef.current?.querySelector(".psv-container") as HTMLElement | null
+            if (!psvEl) return
+            const r = psvEl.getBoundingClientRect()
+            const pt = { x: mv.clientX - r.left, y: mv.clientY - r.top }
+            const pos = viewer.dataHelper.viewerCoordsToSphericalCoords(pt)
+            if (!pos) return
+            try {
+              markersPlugin.updateMarker({
+                id: markerId,
+                position: { yaw: pos.yaw, pitch: pos.pitch },
+              } as any)
+            } catch {}
+            movedPositionsRef.current[markerId] = {
+              yaw: (pos.yaw * 180) / Math.PI,
+              pitch: (pos.pitch * 180) / Math.PI,
+            }
+            // PSV rebuilds the marker element on position update — re-apply selection + handles
+            requestAnimationFrame(() => {
+              const fresh = markersPlugin.markers?.[markerId]?.domElement as HTMLElement | undefined
+              if (fresh && selectedMarkerRef.current === markerId) {
+                fresh.classList.add("biosphere-selected")
+                if (!fresh.querySelector(".biosphere-handle")) {
+                  attachResizeHandles(fresh, markerId, data)
+                }
+              }
+            })
+          }
+          const onUp = () => {
+            document.removeEventListener("mousemove", onMove)
+            document.removeEventListener("mouseup", onUp)
+            psvContainer?.classList.remove("biosphere-dragging")
+          }
+          document.addEventListener("mousemove", onMove)
+          document.addEventListener("mouseup", onUp)
+        }
+        psvContainer?.addEventListener("mousedown", onEditMousedown, true)
+        ;(viewer as any).__biosphereEditCleanup = () => {
+          psvContainer?.removeEventListener("mousedown", onEditMousedown, true)
+        }
+
+        // Handle marker clicks (non-edit mode): video play/stop
         markersPlugin.addEventListener("select-marker", (e: any) => {
+          if (editModeRef.current) return
           const markerConfig = e.marker?.config || e.marker
           const markerId = markerConfig?.id || ""
           const data = markerConfig?.data
-
-          // In edit mode: select marker for repositioning
-          if (editModeRef.current) {
-            // Remove previous selection highlight
-            document.querySelectorAll(".psv-marker.biosphere-selected").forEach((el) => {
-              el.classList.remove("biosphere-selected")
-            })
-            // Highlight the selected marker
-            const markerEl = e.marker?.domElement || document.getElementById(`psv-marker-${markerId}`)
-            if (markerEl) markerEl.classList.add("biosphere-selected")
-            // Set dragging cursor on PSV container
-            const psvContainer = containerRef.current?.querySelector(".psv-container")
-            if (psvContainer) psvContainer.classList.add("biosphere-dragging")
-
-            // Create ghost element that follows the cursor
-            let ghost = document.querySelector(".biosphere-ghost") as HTMLElement
-            if (ghost) ghost.remove()
-            ghost = document.createElement("div")
-            ghost.className = "biosphere-ghost"
-            // Size the ghost based on the marker
-            const markerRect = markerEl?.getBoundingClientRect()
-            const gw = markerRect ? Math.min(markerRect.width * 0.5, 200) : 120
-            const gh = markerRect ? Math.min(markerRect.height * 0.5, 140) : 80
-            ghost.style.width = `${gw}px`
-            ghost.style.height = `${gh}px`
-            ghost.textContent = "Click to drop"
-            // Append to PSV container so it shows in fullscreen too
-            const psvRoot = containerRef.current?.querySelector(".psv-container") || document.body
-            psvRoot.appendChild(ghost)
-
-            const psvEl = containerRef.current?.querySelector(".psv-container") as HTMLElement
-            const moveGhost = (ev: MouseEvent) => {
-              // In fullscreen the ghost is inside PSV so always visible
-              // In normal mode, check if cursor is inside the sphere viewer wrapper
-              const isFullscreen = !!document.fullscreenElement
-              if (!isFullscreen && psvEl) {
-                const wrapperRect = containerRef.current?.getBoundingClientRect()
-                if (wrapperRect) {
-                  const inside = ev.clientX >= wrapperRect.left && ev.clientX <= wrapperRect.right &&
-                                 ev.clientY >= wrapperRect.top && ev.clientY <= wrapperRect.bottom
-                  ghost.style.display = inside ? "flex" : "none"
-                }
-              } else {
-                ghost.style.display = "flex"
-              }
-              ghost.style.left = `${ev.clientX}px`
-              ghost.style.top = `${ev.clientY}px`
-            }
-            document.addEventListener("mousemove", moveGhost)
-            ;(ghost as any).__cleanup = () => document.removeEventListener("mousemove", moveGhost)
-
-            selectedMarkerRef.current = markerId
-            setSelectedMarker(markerId)
-            return
-          }
 
           if (!data?.video_id) return
 
@@ -399,36 +768,6 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
 
         markersPluginRef.current = markersPlugin
 
-        // Edit mode: click sphere to move selected marker
-        viewer.addEventListener("click", (e: any) => {
-          if (!editModeRef.current || !selectedMarkerRef.current) return
-          const yaw = e.data?.yaw
-          const pitch = e.data?.pitch
-          if (yaw !== undefined && pitch !== undefined) {
-            try {
-              markersPlugin.updateMarker({
-                id: selectedMarkerRef.current,
-                position: { yaw, pitch },
-              } as any)
-            } catch (err) {
-            }
-            // Remove selection highlight, dragging cursor, and ghost
-            document.querySelectorAll(".psv-marker.biosphere-selected").forEach((el) => {
-              el.classList.remove("biosphere-selected")
-            })
-            const psvC = containerRef.current?.querySelector(".psv-container")
-            if (psvC) psvC.classList.remove("biosphere-dragging")
-            const ghost = document.querySelector(".biosphere-ghost") as any
-            if (ghost) {
-              ghost.__cleanup?.()
-              ghost.remove()
-            }
-
-            selectedMarkerRef.current = null
-            setSelectedMarker(null)
-          }
-        })
-
         // Listen for Stop button clicks inside playing videos
         const observer = new MutationObserver(() => {
           document.querySelectorAll("[data-action='close']").forEach((el) => {
@@ -449,6 +788,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
           })
         })
         observer.observe(containerRef.current!, { childList: true, subtree: true, attributes: true })
+        ;(viewer as any).__biosphereObserver = observer
       })
     }
 
@@ -456,13 +796,22 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
 
     return () => {
       destroyed = true
+      ;(viewerRef.current as any)?.__biosphereCleanup?.()
+      ;(viewerRef.current as any)?.__biosphereEditCleanup?.()
+      ;(viewerRef.current as any)?.__biosphereObserver?.disconnect()
       viewerRef.current?.destroy()
       viewerRef.current = null
+      setPsvHost(null)
     }
-  }, [imageUrl, tileStem, tileBaseUrl, markers, ready])
+    // NOTE: `markers` intentionally NOT in deps — the viewer builds from the
+    // initial markers prop once, then live edits flow through the plugin and
+    // refs. Re-running this effect would tear down and rebuild the whole
+    // viewer, which happened every time the user saved (annoying reload flash).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageUrl, tileStem, tileBaseUrl, ready])
 
   return (
-    <div className="relative w-full h-[600px] rounded-xl border border-white/10" style={{ zIndex: 20, isolation: "isolate" }}>
+    <div className="relative w-full h-[600px] rounded-xl overflow-hidden border border-white/10" style={{ zIndex: 20, isolation: "isolate" }}>
       <div ref={containerRef} className="w-full h-full" />
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm z-10">
@@ -472,18 +821,9 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
           </div>
         </div>
       )}
-      {/* Edit mode controls — injected into PSV container for fullscreen support */}
-      {!loading && markers.length > 0 && (
+      {/* Edit mode controls — portaled into PSV container so they show in fullscreen too */}
+      {!loading && markers.length > 0 && psvHost && createPortal(
         <div
-          ref={(el) => {
-            // Move this div inside the PSV container so it shows in fullscreen
-            if (el) {
-              const psv = containerRef.current?.querySelector(".psv-container")
-              if (psv && !psv.contains(el)) {
-                psv.appendChild(el)
-              }
-            }
-          }}
           style={{ position: "absolute", top: 12, left: 12, zIndex: 90, display: "flex", alignItems: "center", gap: 8 }}
         >
           <button
@@ -494,6 +834,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
               if (!next) {
                 selectedMarkerRef.current = null
                 setSelectedMarker(null)
+                commitMarkerChanges()
               }
               // Toggle edit-mode styling on all markers
               const psvContainer = containerRef.current?.querySelector(".psv-container")
@@ -503,13 +844,12 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
                 } else {
                   psvContainer.classList.remove("biosphere-edit-mode")
                   psvContainer.classList.remove("biosphere-dragging")
-                  // Remove ghost cursor
                   const ghost = document.querySelector(".biosphere-ghost") as any
                   if (ghost) { ghost.__cleanup?.(); ghost.remove() }
-                  // Remove selection highlights
                   document.querySelectorAll(".psv-marker.biosphere-selected").forEach((el) => {
                     el.classList.remove("biosphere-selected")
                   })
+                  document.querySelectorAll(".biosphere-handle").forEach((h) => h.remove())
                 }
               }
             }}
@@ -524,16 +864,96 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
             {editMode ? "Done Editing" : "Edit Layout"}
           </button>
           {editMode && (
-            <span style={{
-              padding: "4px 8px", fontSize: 10, borderRadius: 6,
-              background: selectedMarker ? "rgba(59,130,246,0.2)" : "rgba(0,0,0,0.4)",
-              color: selectedMarker ? "rgba(147,197,253,1)" : "rgba(255,255,255,0.4)",
-              border: selectedMarker ? "1px solid rgba(59,130,246,0.3)" : "none",
-            }}>
-              {selectedMarker ? "Click to drop" : "Click a marker to move it"}
-            </span>
+            <button
+              onClick={async () => {
+                setSaving(true)
+                try {
+                  await commitMarkerChanges()
+                } finally {
+                  setSaving(false)
+                }
+              }}
+              disabled={saving}
+              style={{
+                padding: "6px 12px", fontSize: 12, borderRadius: 8,
+                backdropFilter: "blur(8px)", transition: "all 0.2s",
+                cursor: saving ? "default" : "pointer",
+                border: "1px solid rgba(34,197,94,0.5)",
+                background: saving ? "rgba(34,197,94,0.4)" : "rgba(34,197,94,0.8)",
+                color: "white",
+                opacity: saving ? 0.7 : 1,
+              }}
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
           )}
-        </div>
+          {editMode && (
+            <>
+              <button
+                onClick={() => setAddOpen(true)}
+                style={{
+                  padding: "6px 12px", fontSize: 12, borderRadius: 8,
+                  backdropFilter: "blur(8px)", cursor: "pointer", transition: "all 0.2s",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  background: "rgba(0,0,0,0.45)",
+                  color: "white",
+                }}
+              >
+                + Add
+              </button>
+              <span style={{
+                padding: "4px 8px", fontSize: 10, borderRadius: 6,
+                background: selectedMarker ? "rgba(59,130,246,0.2)" : "rgba(0,0,0,0.4)",
+                color: selectedMarker ? "rgba(147,197,253,1)" : "rgba(255,255,255,0.4)",
+                border: selectedMarker ? "1px solid rgba(59,130,246,0.3)" : "none",
+              }}>
+                {selectedMarker ? "Drag to move • corners to resize" : "Drag a marker to move it"}
+              </span>
+            </>
+          )}
+        </div>,
+        psvHost
+      )}
+      {addOpen && psvHost && createPortal(
+        <AddMarkerModal
+          onClose={() => setAddOpen(false)}
+          onAdd={async (builder) => {
+            await addMarkerAtCurrentView(builder)
+            setAddOpen(false)
+          }}
+        />,
+        psvHost
+      )}
+      {/* 360 toggle — lock/unlock vertical look */}
+      {!loading && psvHost && createPortal(
+        <div
+          style={{ position: "absolute", top: 12, right: 12, zIndex: 90 }}
+        >
+          <button
+            onClick={() => {
+              const next = !lock360
+              setLock360(next)
+              lock360Ref.current = next
+              // If locking, snap back to equator
+              if (next && viewerRef.current) {
+                const pos = viewerRef.current.getPosition()
+                if (Math.abs(pos.pitch) > Math.PI / 6) {
+                  viewerRef.current.animate({ yaw: pos.yaw, pitch: 0, speed: "3rpm" })
+                }
+              }
+            }}
+            style={{
+              padding: "6px 12px", fontSize: 12, borderRadius: 8,
+              backdropFilter: "blur(8px)", cursor: "pointer", transition: "all 0.2s",
+              border: lock360 ? "1px solid rgba(255,255,255,0.1)" : "1px solid rgba(59,130,246,0.5)",
+              background: lock360 ? "rgba(0,0,0,0.4)" : "rgba(59,130,246,0.8)",
+              color: lock360 ? "rgba(255,255,255,0.5)" : "white",
+            }}
+          >
+            {lock360 ? "360° Off" : "360° On"}
+          </button>
+        </div>,
+        psvHost
       )}
     </div>
   )

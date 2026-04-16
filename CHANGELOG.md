@@ -1,58 +1,124 @@
 # Changelog
 
-## 2026-04-16
+## 2026-04-16 (late session)
+
+### Sphere editor — drag-to-move, drag-to-resize, inline asset add
+- Move markers by dragging directly (was: click-to-select then click-to-drop)
+- 4 corner handles resize selected marker uniformly (width, height, padding, font scale) via PSV's `scale` config; persists as `scene_scale` field
+- New "+ Add" button opens a tabbed modal for Image / Video / Audio / Bio Links
+- Image: any public URL → framed image marker
+- Video: YouTube or Vimeo URL → auto-detects platform, fetches title + thumbnail via oembed
+- Audio: any audio URL → speaker-style card with HTML5 player
+- Bio Links: card with title + N rows of [emoji, title, url]; links open in new tab
+- "Save" button commits changes without exiting edit mode (viewer no longer re-initializes on markers prop change)
+- New markers drop at current view center, then user drags them where they want
+- Modal backdrop uses native event listeners to block mousedown/wheel/keys from reaching PSV behind it — React's synthetic stopPropagation fires too late because PSV attaches natively at window/container level
+
+### Security + correctness
+- XSS hardening: all scraped/user-supplied strings interpolated into marker HTML pass through `escapeHtml`; URL attributes use `safeUrl` which blocks `javascript:` URIs; YouTube/Vimeo iframe IDs validated via regex before embed
+- `commitMarkerChanges` now correctly derives IDs for `audio` and `bio-links` markers (was silently saving them under `image-N` key and losing edits on reload)
+- Fixed indentation bug in `run_about_me_pipeline` / `run_prompt_pipeline` — `update_generation_status` failure-case call had leaked out of the `except` block
+- Fixed `onMarkersChanged` title accumulation: `profile.name` was being saved as already-decorated `viewData.title`, re-appending " — Generated Sphere" every save; now saves raw `viewData.brand`; one-shot SQL heal applied to polluted rows
+- MutationObserver in viewer ready-handler is now tracked and disconnected on effect teardown
+- AddMarkerModal: submitting state resets on success (was stuck "Adding…")
+
+### Instagram residential-proxy support
+- `profile_scraper.py` honors `IG_PROXY_URL` env var; when set, `instagrapi` routes Instagram traffic through it via `cl.set_proxy()`
+- Railway datacenter IPs are on Instagram's blacklist; long-term plan is a home Mac running `tinyproxy` + Cloudflare Tunnel (see `.audit/notes/residential-ig-proxy-plan.md`)
+
+### Generation ID rename
+- `gen-aboutme-*` → `gen-biosphere-*` prefix for all new generations (existing IDs untouched)
+
+## 2026-04-16 (earlier)
 
 ### Interactive Sphere Editor
-- Edit Layout mode: click markers to select, click sphere to reposition
-- Visual feedback: dashed borders on moveable markers, ghost cursor box with "Click to drop"
-- Works in fullscreen mode
-- Fixed pointer event interception from page wrapper div
+- Edit Layout mode with dashed border highlights on moveable markers
+- Ghost cursor box with "Click to drop" follows mouse during repositioning
+- All marker types moveable: profile cards, video TVs, image frames
+- Marker positions persist to Supabase on Done Editing
+- Fixed pointer event interception from page wrapper (isolation: isolate)
+- Works in fullscreen
 
-### About Me Pipeline
-- Scene analysis via Claude Vision detects TVs/screens in Blockade environments
-- Markers placed at detected screen positions with matching dimensions
-- YouTube search fallback handles typos and alternate names (96% success on 50 influencers)
-- Instagram integration via instagrapi
-- TikTok profile scraping via meta tags
+### Zoom Scaling (Task #5)
+- Markers scale in lockstep with scene using FOV ratio (defaultFov / currentFov)
+- No more arbitrary scale ranges — tied directly to the panorama projection
+- No transition lag — markers snap to position instantly
 
-### Infrastructure
+### 360 Toggle (Task #3)
+- Toggle button in top-right of sphere viewer
+- Off (default): camera locked straight ahead, horizontal pan only
+- On: full 360° freedom
+- Uses PSV before-rotate event to clamp pitch to 0
+
+### Room Size (Task #2)  
+- Blockade prompts request "very spacious and open, high ceilings, wide room"
+- Marker positions spread wider for larger rooms
+- TV positions: -150° to 150° spread
+- Image frame positions widened
+
+### Content as Markers
+- Removed compositing for About Me spheres — all content via interactive markers
+- YouTube thumbnails added as image markers alongside video markers
+- Scene analyzer places content on detected TVs/frames
+- Everything moveable in edit mode
+
+### Gallery Thumbnails
+- 600x300 thumbnails (~20KB) generated in pipeline
+- Examples page loads thumbs instead of 8K previews (5MB → 20KB)
+- Lazy loading on images
+
+### Stronger Anti-Text
+- Expanded Blockade negative_text to cover all typography variations
+- TVs requested as "turned off with solid black screens"
+- Removed all person names from prompts
+
+### UX Fixes
+- Progress as modal overlay (dismissible, generation continues in background)
+- Navigate to sphere on completion instead of inline display
+- Error shown in modal instead of silent close
+- "create bio for" detected as about-me intent (case insensitive)
+- Delete button repositioned to avoid overlap with 360 toggle
+- Footer pinned to bottom with commit hash
+- Enter to submit, Shift+Enter for line break
 - Generation records saved to Supabase at start (survive Railway restarts)
-- Examples page auto-refreshes from Supabase every 5s when items are running
-- Commit hash in footer for version tracking
-- Vercel deploys on every push (ignoreCommand: exit 1)
+- Examples page auto-refreshes from Supabase every 5s
+- Double-delete fix: deleted IDs tracked in session
+
+### Pipeline
+- YouTube search scores channels by name match (96% success rate on 50 influencers)
+- Instagram integration via instagrapi
+- TikTok profile scraping
+- Never fail with "No images found" — falls through to AI generation
+- Commit hash included in generation records
 
 ## 2026-04-15
 
 ### Rebranded to Biosphere
 - App renamed from Cozmos to Biosphere
-- Domain: biosphere.ink
+- Domain: biosphere.ink with SSL
 - Favicon updated to B logo
 
 ### AI Sphere Generation
 - Blockade Labs integration for 16K equirectangular panoramas
-- M3 Photoreal style, negative text to prevent AI text artifacts
-- Native 16K export via Blockade export API
+- M3 Photoreal style, native 16K export
+- Scene analysis via Claude Vision for marker placement
 
 ### About Me Spheres
 - Profile scraper: YouTube, Twitter, Instagram, TikTok
 - Personalized Blockade environments based on content analysis
 - Interactive markers: profile card, video TVs, picture frames
+- Videos play inside sphere (YouTube iframe in marker)
 
 ### Core Features
-- Generation progress in modal overlay (dismissible, generation continues in background)
 - Image uploader with Composite/New Sphere toggle
 - Delete sphere with confirmation modal
 - Cancel button during generation
-- Enter to submit, Shift+Enter for line break
 
 ## 2026-04-14
 
 ### Initial Build
-- Next.js 15 frontend with Photo Sphere Viewer
+- Next.js frontend with Photo Sphere Viewer
 - 4-level progressive tile loading (2K→16K)
-- FastAPI pipeline on Railway: scrape → upscale → compose → tile
+- FastAPI pipeline on Railway
 - fal.ai ESRGAN GPU upscaling
 - Supabase Storage + PostgreSQL
-- Playwright screenshot fallback for JS-heavy sites
-- Social profile detection (@brand)
-- Equatorial band compositing to avoid pole distortion
