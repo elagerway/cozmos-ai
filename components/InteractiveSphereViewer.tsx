@@ -26,6 +26,7 @@ interface MarkerDef {
   type: "video" | "profile" | "image"
   yaw: number
   pitch: number
+  scene_width?: number
   data: VideoMarkerData | ProfileMarkerData | any
 }
 
@@ -82,7 +83,7 @@ function ProfileCardHTML(data: ProfileMarkerData): string {
   `
 }
 
-function VideoThumbnailHTML(data: VideoMarkerData): string {
+function VideoThumbnailHTML(data: VideoMarkerData, width: number = 360): string {
   // Wall-mounted TV — thick bezel, screen glow, realistic proportions
   return `
     <div data-video-id="${data.video_id}" data-mode="thumbnail" style="
@@ -90,7 +91,7 @@ function VideoThumbnailHTML(data: VideoMarkerData): string {
       border: 12px solid #111;
       border-bottom: 18px solid #111;
       border-radius: 6px;
-      width: 360px;
+      width: ${width}px;
       overflow: hidden;
       color: white;
       font-family: Inter, system-ui, sans-serif;
@@ -114,7 +115,7 @@ function VideoThumbnailHTML(data: VideoMarkerData): string {
   `
 }
 
-function VideoPlayingHTML(data: VideoMarkerData): string {
+function VideoPlayingHTML(data: VideoMarkerData, width: number = 360): string {
   // TV screen with YouTube iframe — same bezel styling, seamless transition
   return `
     <div data-video-id="${data.video_id}" data-mode="playing" style="
@@ -122,7 +123,7 @@ function VideoPlayingHTML(data: VideoMarkerData): string {
       border: 12px solid #111;
       border-bottom: 18px solid #111;
       border-radius: 6px;
-      width: 360px;
+      width: ${width}px;
       overflow: hidden;
       color: white;
       font-family: Inter, system-ui, sans-serif;
@@ -247,12 +248,13 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
             } as any)
           } else if (marker.type === "video") {
             const vdata = marker.data as VideoMarkerData
+            const sceneW = marker.scene_width || 360
             markersPlugin.addMarker({
               id: `video-${vdata.video_id}`,
               position: { yaw: yawRad, pitch: pitchRad },
-              html: VideoThumbnailHTML(vdata),
+              html: VideoThumbnailHTML(vdata, sceneW),
               anchor: "center center",
-              data: { ...vdata, markerType: "video" },
+              data: { ...vdata, markerType: "video", sceneWidth: sceneW },
             } as any)
           } else if (marker.type === "image") {
             markersPlugin.addMarker({
@@ -272,19 +274,20 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
 
           const markerId = `video-${data.video_id}`
 
+          const sw = data.sceneWidth || 360
           if (playingVideos.has(data.video_id)) {
             // Stop — swap back to thumbnail
             playingVideos.delete(data.video_id)
             markersPlugin.updateMarker({
               id: markerId,
-              html: VideoThumbnailHTML(data as VideoMarkerData),
+              html: VideoThumbnailHTML(data as VideoMarkerData, sw),
             } as any)
           } else {
             // Play — swap to iframe
             playingVideos.add(data.video_id)
             markersPlugin.updateMarker({
               id: markerId,
-              html: VideoPlayingHTML(data as VideoMarkerData),
+              html: VideoPlayingHTML(data as VideoMarkerData, sw),
             } as any)
           }
         })
@@ -302,7 +305,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
               if (origMarker) {
                 markersPlugin.updateMarker({
                   id: `video-${videoId}`,
-                  html: VideoThumbnailHTML(origMarker.data as VideoMarkerData),
+                  html: VideoThumbnailHTML(origMarker.data as VideoMarkerData, origMarker.scene_width || 360),
                 } as any)
               }
             }
