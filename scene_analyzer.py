@@ -183,7 +183,7 @@ def assign_content_to_positions(
             "data": profile_data,
         })
 
-    # Assign videos to remaining TVs
+    # Assign videos to remaining TVs — include detected width for sizing
     for i, tv in enumerate(tvs):
         if i >= len(videos):
             break
@@ -191,6 +191,7 @@ def assign_content_to_positions(
             "type": "video",
             "yaw": tv["yaw"],
             "pitch": tv["pitch"],
+            "scene_width": tv.get("width", 360),
             "data": videos[i],
         })
 
@@ -202,6 +203,7 @@ def assign_content_to_positions(
             "type": "image",
             "yaw": frame["yaw"],
             "pitch": frame["pitch"],
+            "scene_width": frame.get("width", 160),
             "data": {
                 "image_url": images[i],
                 "source": "instagram",
