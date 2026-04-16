@@ -433,6 +433,12 @@ export default function HomePage() {
             <Textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault()
+                  if (prompt.trim() && !generating) handleGenerate()
+                }
+              }}
               placeholder='Describe your bio — mention @handle or paste a social profile URL for style inspiration...'
               className="min-h-[120px] bg-white/5 border-white/10 text-foreground placeholder:text-muted-foreground resize-none text-base"
               disabled={generating}
