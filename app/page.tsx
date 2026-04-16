@@ -464,10 +464,24 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Generation Progress Modal */}
+      {/* Generation Progress Modal — any close action dismisses to background */}
       {generating && !done && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-[#1a1a1a] border border-white/10 rounded-xl p-8 max-w-lg w-full mx-4 space-y-6">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => {
+            // Clicking backdrop dismisses — generation continues in background
+            if (activeGenId) {
+              const pending = JSON.parse(localStorage.getItem("biosphere-pending") || "[]")
+              pending.push({ id: activeGenId, prompt: submittedPrompt, startedAt: Date.now() })
+              localStorage.setItem("biosphere-pending", JSON.stringify(pending))
+            }
+            setGenerating(false)
+            setDone(false)
+            setPrompt("")
+            setSubmittedPrompt("")
+          }}
+        >
+          <div className="bg-[#1a1a1a] border border-white/10 rounded-xl p-8 max-w-lg w-full mx-4 space-y-6" onClick={(e) => e.stopPropagation()}>
             <div>
               <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Brief</p>
               <p className="text-foreground text-sm">{submittedPrompt}</p>
@@ -480,11 +494,10 @@ export default function HomePage() {
               hasSocialProfile={!!detectedProfile}
             />
 
-            <div className="flex gap-3 justify-end pt-2">
+            <div className="flex gap-3 justify-between items-center pt-2">
+              <p className="text-[11px] text-muted-foreground/50">Close this modal anytime — your sphere will appear in examples when ready</p>
               <button
                 onClick={() => {
-                  // Dismiss modal — generation continues in background
-                  // Save to localStorage so examples page can show spinner
                   if (activeGenId) {
                     const pending = JSON.parse(localStorage.getItem("biosphere-pending") || "[]")
                     pending.push({ id: activeGenId, prompt: submittedPrompt, startedAt: Date.now() })
@@ -495,18 +508,9 @@ export default function HomePage() {
                   setPrompt("")
                   setSubmittedPrompt("")
                 }}
-                className="px-5 py-2 text-sm font-medium rounded-lg border border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20 transition-all"
+                className="px-5 py-2 text-sm font-medium rounded-lg border border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20 transition-all whitespace-nowrap"
               >
-                Dismiss — will appear in examples when ready
-              </button>
-              <button
-                onClick={() => {
-                  cleanupRef.current?.()
-                  handleReset()
-                }}
-                className="px-5 py-2 text-sm font-medium rounded-lg border border-white/10 text-muted-foreground hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/5 transition-all"
-              >
-                Cancel
+                Dismiss
               </button>
             </div>
           </div>
