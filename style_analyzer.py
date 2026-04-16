@@ -167,11 +167,12 @@ def build_blockade_prompt(brand: str, images: list[bytes], source_url: str = "")
     brand_name = brand.capitalize() if brand else "the brand"
 
     prompt = (
-        f"A stunning 360-degree immersive environment designed as a {brand_name} brand experience. "
+        f"A stunning 360-degree immersive environment designed as a brand experience. "
         f"{environment}. "
         f"The color palette features {color_desc} tones with {mood}. "
         f"Product display areas with elegant pedestals and floating shelves. "
-        f"Photorealistic quality, cinematic lighting, 8K detail."
+        f"Photorealistic quality, cinematic lighting, 8K detail. "
+        f"No text, no words, no letters, no writing, no signs, no labels anywhere in the scene."
     )
 
     print(f"  Style analysis:")

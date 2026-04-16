@@ -542,26 +542,26 @@ def build_about_me_prompt(profile: InfluencerProfile) -> str:
     bio_lower = (profile.bio or "").lower()
     name = profile.name
 
-    # Every environment includes: wall-mounted TV screens for videos, framed pictures on walls,
-    # and a central display area. This ensures the interactive markers feel native to the scene.
-    screen_desc = "Large flat-screen TVs mounted on walls showing content, elegant picture frames displaying photographs, a central holographic display pedestal"
+    # Every environment includes: wall-mounted TV screens, framed pictures on walls,
+    # and a central display area. NO text, names, or words in the scene — AI renders text badly.
+    screen_desc = "Large flat-screen TVs mounted on walls with blank dark screens, elegant empty picture frames on walls, a central display pedestal"
 
     if any(w in bio_lower for w in ["tech", "review", "gadget", "phone", "computer", "software"]):
-        env = f"a sleek modern tech studio personal space for {name}, dark walls with subtle colored LED accent lighting, {screen_desc}, professional camera equipment on tripods, cinematic studio lighting, cable management visible"
+        env = f"a sleek modern tech studio, dark walls with subtle colored LED accent lighting, {screen_desc}, professional camera equipment on tripods, cinematic studio lighting"
     elif any(w in bio_lower for w in ["music", "artist", "singer", "rapper", "producer", "dj"]):
-        env = f"a dramatic music studio and lounge for {name}, moody concert lighting, {screen_desc}, speakers, vinyl records on shelves, mixing console, neon accents, intimate performance atmosphere"
+        env = f"a dramatic music studio and lounge, moody concert lighting, {screen_desc}, speakers, vinyl records on shelves, mixing console, neon accents"
     elif any(w in bio_lower for w in ["fitness", "gym", "workout", "athlete", "sport"]):
-        env = f"a premium athletic personal space for {name}, dramatic spotlights, {screen_desc}, trophy case, motivational atmosphere, dark concrete and steel, gym equipment in background"
+        env = f"a premium athletic personal space, dramatic spotlights, {screen_desc}, trophy case, dark concrete and steel, gym equipment in background"
     elif any(w in bio_lower for w in ["fashion", "style", "model", "beauty", "makeup"]):
-        env = f"a luxury fashion showroom personal space for {name}, marble floors, {screen_desc}, dramatic runway lighting, velvet curtains, gold accents, mannequins with outfits"
+        env = f"a luxury fashion showroom, marble floors, {screen_desc}, dramatic runway lighting, velvet curtains, gold accents, mannequins"
     elif any(w in bio_lower for w in ["food", "cook", "chef", "recipe", "kitchen"]):
-        env = f"a stunning professional kitchen and dining lounge for {name}, warm ambient lighting, {screen_desc}, copper pots hanging, marble countertops, cookbook shelves"
+        env = f"a stunning professional kitchen and dining lounge, warm ambient lighting, {screen_desc}, copper pots hanging, marble countertops"
     elif any(w in bio_lower for w in ["travel", "adventure", "explore", "outdoor"]):
-        env = f"a breathtaking travel lodge personal space for {name}, panoramic windows with scenic views, {screen_desc}, warm wood interior, vintage maps on walls, globes, camera gear"
+        env = f"a breathtaking travel lodge, panoramic windows with scenic views, {screen_desc}, warm wood interior, globes, camera gear"
     elif any(w in bio_lower for w in ["game", "gaming", "stream", "twitch", "esport"]):
-        env = f"an epic gaming command center for {name}, RGB lighting, {screen_desc}, multiple gaming monitors, dark room with neon accents, gaming chair, trophy shelf"
+        env = f"an epic gaming command center, RGB lighting, {screen_desc}, multiple gaming monitors, dark room with neon accents, gaming chair"
     else:
-        env = f"a stylish modern creator studio personal space for {name}, professional warm lighting, clean design, {screen_desc}, bookshelves, comfortable seating area, warm atmospheric lighting"
+        env = f"a stylish modern creator studio, professional warm lighting, clean design, {screen_desc}, bookshelves, comfortable seating area"
 
     # Add color influence
     color_desc = ""
@@ -579,7 +579,7 @@ def build_about_me_prompt(profile: InfluencerProfile) -> str:
         if color_names:
             color_desc = f" The color scheme features {' and '.join(color_names[:2])} accent tones."
 
-    prompt = f"{env}.{color_desc} Photorealistic quality, cinematic depth of field, 8K detail, immersive atmosphere."
+    prompt = f"{env}.{color_desc} Photorealistic quality, cinematic depth of field, 8K detail, immersive atmosphere. No text, no words, no letters, no writing, no signs, no labels anywhere in the scene."
 
     print(f"  Blockade prompt: {prompt[:120]}...")
     return prompt
