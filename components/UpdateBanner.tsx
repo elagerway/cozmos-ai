@@ -6,24 +6,36 @@ export function UpdateBanner() {
   const [showBanner, setShowBanner] = useState(false)
 
   useEffect(() => {
-    // Store the initial build ID from the page load
-    const initialBuildId = document.querySelector("script[src*='/_next/static/']")?.getAttribute("src")?.match(/\/_next\/static\/([^/]+)\//)?.[1] || ""
+    // Capture initial build ID from any Next.js chunk URL in the page
+    const scripts = Array.from(document.querySelectorAll("script[src]"))
+    const buildIds = scripts
+      .map((s) => s.getAttribute("src")?.match(/\/_next\/static\/([^/]+)\//)?.[1])
+      .filter(Boolean) as string[]
 
+    const initialBuildId = buildIds[0] || ""
     if (!initialBuildId) return
 
     const interval = setInterval(async () => {
       try {
-        const resp = await fetch("/", { headers: { Accept: "text/html" } })
+        // Fetch the raw HTML page (not RSC) with cache bust
+        const resp = await fetch(`/?_t=${Date.now()}`, {
+          headers: { Accept: "text/html" },
+          cache: "no-store",
+        })
         const html = await resp.text()
+
+        // Only check if we got actual HTML back
+        if (!html.includes("/_next/static/")) return
+
         const match = html.match(/\/_next\/static\/([^/]+)\//)
-        if (match && match[1] !== initialBuildId) {
+        if (match && match[1] && match[1] !== initialBuildId) {
           setShowBanner(true)
           clearInterval(interval)
         }
       } catch {
-        // Ignore fetch errors
+        // Ignore
       }
-    }, 30000) // Check every 30 seconds
+    }, 60000) // Check every 60 seconds (less aggressive)
 
     return () => clearInterval(interval)
   }, [])
