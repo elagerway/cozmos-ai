@@ -11,7 +11,6 @@ if [ -n "$TS_AUTHKEY" ]; then
     --state=mem: \
     --socket=/var/run/tailscale/tailscaled.sock \
     --socks5-server=localhost:1055 \
-    --outbound-http-proxy-listen=localhost:1055 \
     >/var/log/tailscaled.log 2>&1 &
 
   # Wait briefly for the socket
