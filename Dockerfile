@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     iptables \
+    socat \
+    iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Tailscale (official install script — writes /usr/bin/tailscale + /usr/sbin/tailscaled)

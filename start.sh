@@ -24,22 +24,17 @@ if [ -n "$TS_AUTHKEY" ]; then
   done
 
   echo "[tailscale] joining tailnet..."
-  # --exit-node: route public-IP traffic via the Mac (residential IP).
-  #   In userspace-networking mode this only affects packets that go through
-  #   tailscaled's SOCKS5/HTTP proxy (localhost:1055). Direct socket calls
-  #   (YouTube scrape, fal.ai upload, Blockade API) bypass it and use
-  #   Railway's normal network — so only Instagram, which we explicitly
-  #   route via IG_PROXY_URL=socks5h://localhost:1055, exits via the Mac.
-  # --exit-node expects an IP or a unique node name; hostnames like
-  # "eriks-macbook-pro" get rejected as ambiguous. Use the Mac's tailnet IP.
-  : "${TS_EXIT_NODE:=100.106.195.29}"
+  # We use tailscale ONLY to reach the Mac's tailnet IP (100.106.195.29).
+  # No exit-node — userspace-networking has a known limitation where
+  # --exit-node doesn't route public traffic through SOCKS5 proxies.
+  # Instead, tinyproxy on the Mac handles the actual public-internet hop,
+  # and a small socat forwarder in this container bridges Python's
+  # localhost to tinyproxy over the tailnet SOCKS5.
   /usr/bin/tailscale up \
     --authkey="$TS_AUTHKEY" \
     --hostname="${TS_HOSTNAME:-cozmos-pipeline}" \
     --accept-routes \
-    --accept-dns=false \
-    --exit-node="$TS_EXIT_NODE" \
-    --exit-node-allow-lan-access=false || {
+    --accept-dns=false || {
       echo "[tailscale] WARN: tailscale up failed; pipeline will continue without IG proxy"
     }
   /usr/bin/tailscale status || true
@@ -56,8 +51,22 @@ if [ -n "$TS_AUTHKEY" ]; then
   echo "[diag] tailscale ping 100.106.195.29 (Mac):"
   /usr/bin/tailscale ping --timeout=8s --c=3 100.106.195.29 2>&1 | sed 's/^/  /'
 
-  echo "[diag] tailscale debug prefs (exit node config):"
+  echo "[diag] tailscale debug prefs:"
   /usr/bin/tailscale debug prefs 2>&1 | grep -iE "exitnode|exit_node|advertiseexit" | sed 's/^/  /'
+
+  # Socat bridge: Python's localhost:8888 → SOCKS5 → tailnet → Mac tinyproxy:8888.
+  # Instagram traffic enters this bridge via IG_PROXY_URL=http://...@localhost:8888,
+  # traverses the tailnet, and egresses from the Mac's residential ISP.
+  echo "[bridge] starting socat: localhost:8888 → SOCKS5(127.0.0.1:1055) → 100.106.195.29:8888"
+  socat TCP-LISTEN:8888,fork,reuseaddr,bind=127.0.0.1 \
+        SOCKS5:127.0.0.1:100.106.195.29:8888,socksport=1055 \
+        >/var/log/socat.log 2>&1 &
+
+  sleep 2
+  echo "[diag] after bridge — egress IP via http://127.0.0.1:8888 (should be home IP):"
+  curl --max-time 15 --silent --proxy "http://biosphere:NeverSt0pSwinging%21@127.0.0.1:8888" https://api.ipify.org \
+    || echo "  (bridge curl failed)"
+  echo
 
   echo "[diag] egress IP via SOCKS5 (socks5h://127.0.0.1:1055):"
   curl --max-time 20 --silent --proxy socks5h://127.0.0.1:1055 https://api.ipify.org || echo "  (socks5 curl failed)"
