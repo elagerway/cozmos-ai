@@ -35,6 +35,17 @@ if [ -n "$TS_AUTHKEY" ]; then
     --exit-node="$TS_EXIT_NODE" \
     --exit-node-allow-lan-access=false
   /usr/bin/tailscale status || true
+
+  # Diagnostic: what egress IP does SOCKS5 proxy exit through?
+  # If this prints the Mac's home IP → exit node works → Instagram IP-blacklist
+  # is the real issue. If it prints a Tailscale DERP / Railway IP → exit node
+  # didn't apply.
+  echo "[diag] egress IP via socks5h://localhost:1055:"
+  curl --max-time 10 --silent --proxy socks5h://localhost:1055 https://api.ipify.org || echo "  (curl failed)"
+  echo
+  echo "[diag] egress IP direct (no proxy, for comparison):"
+  curl --max-time 10 --silent https://api.ipify.org || echo "  (curl failed)"
+  echo
 else
   echo "[tailscale] TS_AUTHKEY not set, skipping tailnet join (IG proxy disabled)"
 fi
