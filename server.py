@@ -749,12 +749,20 @@ def update_generation_status(gen_id: str, data: dict):
         print(f"  DB update failed: {resp.status_code} {resp.text[:200]}")
 
 
-def generate_tiles(canvas: pyvips.Image, sphere_id: str, upload: bool = True, on_progress=None) -> str:
-    """Generate tile pyramid and optionally upload to Supabase Storage."""
+def generate_tiles(canvas: pyvips.Image, sphere_id: str, upload: bool = True, on_progress=None, high_res: bool = False) -> str:
+    """Generate tile pyramid and optionally upload to Supabase Storage.
+
+    high_res=False (default) skips the 16K level (level index 3). That drops the
+    tile count from 170 → 42 and makes generation + upload roughly 4× faster,
+    with no visual difference at normal viewing distance. Set True to keep 16K
+    for extreme zoom-in sharpness.
+    """
     sphere_tiles_dir = TILES_DIR / sphere_id
     if sphere_tiles_dir.exists():
         shutil.rmtree(sphere_tiles_dir)
     sphere_tiles_dir.mkdir(parents=True, exist_ok=True)
+
+    levels = LEVELS if high_res else LEVELS[:3]
 
     # Base image
     base = canvas.resize(
@@ -768,9 +776,9 @@ def generate_tiles(canvas: pyvips.Image, sphere_id: str, upload: bool = True, on
         upload_to_supabase(f"tiles/{sphere_id}/base.jpg", buf)
 
     # Tile levels
-    total_tiles = sum(l["cols"] * l["rows"] for l in LEVELS)
+    total_tiles = sum(l["cols"] * l["rows"] for l in levels)
     tiles_done = 0
-    for li, level in enumerate(LEVELS):
+    for li, level in enumerate(levels):
         level_dir = sphere_tiles_dir / str(li)
         level_dir.mkdir(exist_ok=True)
         lh = level["width"] // 2
@@ -1051,6 +1059,7 @@ async def generate_about_me(body: dict):
     """Generate an interactive About Me sphere for an influencer."""
     name = body.get("name", "").strip()
     prompt = body.get("prompt", "")
+    high_res = bool(body.get("high_res", False))
 
     if not name:
         return JSONResponse({"error": "name is required"}, status_code=400)
@@ -1131,7 +1140,7 @@ async def generate_about_me(body: dict):
                 update("tiles", pct, f"Generating tiles ({done}/{total})...")
 
             update("tiles", 72, "Generating tile pyramid...")
-            generate_tiles(canvas, gen_id, on_progress=on_tile_progress)
+            generate_tiles(canvas, gen_id, on_progress=on_tile_progress, high_res=high_res)
             update("tiles", 95, "Tiles generated")
 
             # Step 5: Build markers — use detected scene positions if available
@@ -1257,6 +1266,7 @@ async def generate(body: dict):
     brand = body.get("brand", "").strip().lower().replace("@", "")
     prompt = body.get("prompt", "")
     source_url = body.get("url", "").strip()
+    high_res = bool(body.get("high_res", False))
 
     # Detect "about me" intent — route to about-me pipeline
     prompt_lower = prompt.lower()
@@ -1272,7 +1282,7 @@ async def generate(body: dict):
         # Filter out noise words
         noise = {"a", "an", "the", "my", "our", "your", "this", "that", "new", "sphere"}
         if about_me_name and about_me_name.lower() not in noise:
-            return await generate_about_me({"name": about_me_name, "prompt": prompt})
+            return await generate_about_me({"name": about_me_name, "prompt": prompt, "high_res": high_res})
 
     # If no explicit brand or URL, try to extract from the prompt
     if not brand and not source_url and prompt:
