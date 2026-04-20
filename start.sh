@@ -53,6 +53,12 @@ if [ -n "$TS_AUTHKEY" ]; then
     (command -v netstat >/dev/null && netstat -tln 2>/dev/null | grep -E "1055|1056") || \
     echo "  (no ss/netstat available)"
 
+  echo "[diag] tailscale ping 100.106.195.29 (Mac):"
+  /usr/bin/tailscale ping --timeout=8s --c=3 100.106.195.29 2>&1 | sed 's/^/  /'
+
+  echo "[diag] tailscale debug prefs (exit node config):"
+  /usr/bin/tailscale debug prefs 2>&1 | grep -iE "exitnode|exit_node|advertiseexit" | sed 's/^/  /'
+
   echo "[diag] egress IP via SOCKS5 (socks5h://127.0.0.1:1055):"
   curl --max-time 20 --silent --proxy socks5h://127.0.0.1:1055 https://api.ipify.org || echo "  (socks5 curl failed)"
   echo
