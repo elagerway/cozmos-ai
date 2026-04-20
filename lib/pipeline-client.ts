@@ -21,12 +21,13 @@ export interface PipelineStatus {
 export async function startGeneration(
   brand: string,
   prompt: string,
-  url?: string
+  url?: string,
+  highRes: boolean = false,
 ): Promise<{ id: string }> {
   const res = await fetch(`${PIPELINE_URL}/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ brand, prompt, url: url || "" }),
+    body: JSON.stringify({ brand, prompt, url: url || "", high_res: highRes }),
   })
   if (!res.ok) throw new Error("Failed to start generation")
   return res.json()

@@ -27,6 +27,7 @@ import { fetchGenerations, GenerationRow } from "@/lib/supabase"
 export default function HomePage() {
   const router = useRouter()
   const [prompt, setPrompt] = useState("")
+  const [highRes, setHighRes] = useState(false)
 
   // Generation state
   const [generating, setGenerating] = useState(false)
@@ -146,7 +147,8 @@ export default function HomePage() {
         const { id: genId } = await startGeneration(
           handle || "",
           prompt.trim(),
-          sourceUrl
+          sourceUrl,
+          highRes,
         )
         setActiveGenId(genId)
 
@@ -456,6 +458,20 @@ export default function HomePage() {
               </div>
             )}
           </div>
+
+          <label className="flex items-start gap-2 cursor-pointer select-none px-1 -mt-1">
+            <input
+              type="checkbox"
+              checked={highRes}
+              onChange={(e) => setHighRes(e.target.checked)}
+              disabled={generating}
+              className="mt-0.5 w-4 h-4 accent-blue-500 cursor-pointer"
+            />
+            <span className="text-xs text-muted-foreground leading-relaxed">
+              <span className="text-foreground/80 font-medium">Ultra HD</span>
+              <span className="text-muted-foreground/70"> — sharper at deep zoom, adds ~2 min</span>
+            </span>
+          </label>
 
           <Button
             onClick={handleGenerate}
