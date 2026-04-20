@@ -6,11 +6,15 @@
 
 if [ -n "$TS_AUTHKEY" ]; then
   echo "[tailscale] starting userspace daemon..."
+  # Bind SOCKS5 + HTTP on explicit 127.0.0.1 (localhost resolution in the
+  # container may land on ::1 which tailscaled doesn't listen on).
+  # Separate ports so neither server silently loses the bind.
   /usr/sbin/tailscaled \
     --tun=userspace-networking \
     --state=mem: \
     --socket=/var/run/tailscale/tailscaled.sock \
-    --socks5-server=localhost:1055 \
+    --socks5-server=127.0.0.1:1055 \
+    --outbound-http-proxy-listen=127.0.0.1:1056 \
     >/var/log/tailscaled.log 2>&1 &
 
   # Wait briefly for the socket
@@ -40,15 +44,23 @@ if [ -n "$TS_AUTHKEY" ]; then
     }
   /usr/bin/tailscale status || true
 
-  # Diagnostic: what egress IP does SOCKS5 proxy exit through?
-  # If this prints the Mac's home IP → exit node works → Instagram IP-blacklist
-  # is the real issue. If it prints a Tailscale DERP / Railway IP → exit node
-  # didn't apply.
-  echo "[diag] egress IP via socks5h://localhost:1055:"
-  curl --max-time 10 --silent --proxy socks5h://localhost:1055 https://api.ipify.org || echo "  (curl failed)"
+  # Give tailscaled a few seconds to fully bring up the proxy listeners
+  # after tailnet auth — they don't start accepting until the node is ready.
+  sleep 5
+
+  echo "[diag] listeners on 127.0.0.1 (socks5 + http proxy):"
+  (command -v ss >/dev/null && ss -tln 2>/dev/null | grep -E "1055|1056") || \
+    (command -v netstat >/dev/null && netstat -tln 2>/dev/null | grep -E "1055|1056") || \
+    echo "  (no ss/netstat available)"
+
+  echo "[diag] egress IP via SOCKS5 (socks5h://127.0.0.1:1055):"
+  curl --max-time 20 --silent --proxy socks5h://127.0.0.1:1055 https://api.ipify.org || echo "  (socks5 curl failed)"
   echo
-  echo "[diag] egress IP direct (no proxy, for comparison):"
-  curl --max-time 10 --silent https://api.ipify.org || echo "  (curl failed)"
+  echo "[diag] egress IP via HTTP proxy (http://127.0.0.1:1056):"
+  curl --max-time 20 --silent --proxy http://127.0.0.1:1056 https://api.ipify.org || echo "  (http curl failed)"
+  echo
+  echo "[diag] egress IP direct (no proxy, Railway egress):"
+  curl --max-time 10 --silent https://api.ipify.org || echo "  (direct curl failed)"
   echo
 else
   echo "[tailscale] TS_AUTHKEY not set, skipping tailnet join (IG proxy disabled)"
