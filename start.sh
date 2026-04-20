@@ -1,7 +1,8 @@
 #!/bin/sh
 # Brings up Tailscale in userspace-networking mode so the pipeline can reach
-# the home-Mac IG proxy over the tailnet, then execs the pipeline server.
-set -e
+# the home-Mac exit node over the tailnet, then execs the pipeline server.
+# NOT using `set -e` — tailscale config failure must not crash the container;
+# we still want the pipeline to serve (IG scrape will just fail gracefully).
 
 if [ -n "$TS_AUTHKEY" ]; then
   echo "[tailscale] starting userspace daemon..."
@@ -26,14 +27,18 @@ if [ -n "$TS_AUTHKEY" ]; then
   #   (YouTube scrape, fal.ai upload, Blockade API) bypass it and use
   #   Railway's normal network — so only Instagram, which we explicitly
   #   route via IG_PROXY_URL=socks5h://localhost:1055, exits via the Mac.
-  : "${TS_EXIT_NODE:=eriks-macbook-pro}"
+  # --exit-node expects an IP or a unique node name; hostnames like
+  # "eriks-macbook-pro" get rejected as ambiguous. Use the Mac's tailnet IP.
+  : "${TS_EXIT_NODE:=100.106.195.29}"
   /usr/bin/tailscale up \
     --authkey="$TS_AUTHKEY" \
     --hostname="${TS_HOSTNAME:-cozmos-pipeline}" \
     --accept-routes \
     --accept-dns=false \
     --exit-node="$TS_EXIT_NODE" \
-    --exit-node-allow-lan-access=false
+    --exit-node-allow-lan-access=false || {
+      echo "[tailscale] WARN: tailscale up failed; pipeline will continue without IG proxy"
+    }
   /usr/bin/tailscale status || true
 
   # Diagnostic: what egress IP does SOCKS5 proxy exit through?
