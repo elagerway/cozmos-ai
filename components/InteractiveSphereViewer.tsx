@@ -5,6 +5,9 @@ import { createPortal } from "react-dom"
 import "@photo-sphere-viewer/core/index.css"
 import "@photo-sphere-viewer/markers-plugin/index.css"
 import { AddMarkerModal } from "./AddMarkerModal"
+import { RerollBackgroundModal } from "./RerollBackgroundModal"
+import { CopilotPanel, type CopilotActions } from "./CopilotPanel"
+import { startBackgroundReroll, startVariantReroll } from "@/lib/pipeline-client"
 import { useEventTracker } from "@/lib/event-tracker"
 
 interface VideoMarkerData {
@@ -318,6 +321,8 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
   const [psvHost, setPsvHost] = useState<HTMLElement | null>(null)
   const [saving, setSaving] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
+  const [rerollOpen, setRerollOpen] = useState(false)
+  const [copilotOpen, setCopilotOpen] = useState(false)
   // Heatmap + top-viewed overlays (patent GB '335 / US '706).
   const [heatmapOn, setHeatmapOn] = useState(false)
   const [eventStats, setEventStats] = useState<Record<string, { selects: number; dwell_ms: number; dwell_rank: number; select_rank: number }>>({})
@@ -989,6 +994,140 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageUrl, tileStem, tileBaseUrl, ready])
 
+  // Cmd/Ctrl+K toggles the copilot panel while in edit mode.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        if (editMode) {
+          e.preventDefault()
+          setCopilotOpen((v) => !v)
+        }
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [editMode])
+
+  // Build the imperative actions the copilot panel can invoke.
+  const copilotActions: CopilotActions = {
+    getProfile() {
+      // Derive a tiny snapshot from current markers + sphere metadata.
+      const profileMarker = markersRef.current.find((m) => m.type === "profile")
+      const data: any = profileMarker?.data ?? {}
+      return {
+        brand: data.name ?? null,
+        prompt: data.bio ?? "",
+        background_prompt: null,
+        reroll_count: 0,
+      }
+    },
+    getMarkers() {
+      return markersRef.current.map((m, i) => {
+        const anyM = m as any
+        const id = m.type === "profile" ? "profile-card"
+          : m.type === "video" ? `video-${(m.data as any).video_id}`
+          : m.type === "audio" ? `audio-${i}-${encodeURIComponent((m.data as any).url || "").slice(0, 24)}`
+          : m.type === "bio-links" ? `bio-links-${i}`
+          : `image-${i}`
+        const d = anyM.data ?? {}
+        const summary = m.type === "profile" ? (d.name || "Profile")
+          : m.type === "video" ? (d.title || `Video ${d.video_id}`)
+          : m.type === "audio" ? (d.title || "Audio")
+          : m.type === "bio-links" ? (d.title || "Bio Links")
+          : (d.title || "Image")
+        return {
+          id,
+          type: m.type,
+          yaw: m.yaw,
+          pitch: m.pitch,
+          scene_scale: anyM.scene_scale,
+          summary,
+        }
+      })
+    },
+    getCurrentView() {
+      const v: any = viewerRef.current
+      if (!v) return { yaw: 0, pitch: 0, fov: 90 }
+      const pos = v.getPosition()
+      return {
+        yaw: (pos.yaw * 180) / Math.PI,
+        pitch: (pos.pitch * 180) / Math.PI,
+        fov: v.getZoomLevel() ?? 90,
+      }
+    },
+    async addMarker(input) {
+      // Use existing addMarkerAtCurrentView path — builder must produce a MarkerDef.
+      await addMarkerAtCurrentView((yaw, pitch) => {
+        const y = input.yaw ?? yaw
+        const p = input.pitch ?? pitch
+        const c = input.content as any
+        if (input.type === "image") {
+          return { type: "image", yaw: y, pitch: p, data: { url: c.url, title: c.title ?? "" }, scene_scale: 1 } as any
+        }
+        if (input.type === "video") {
+          return { type: "video", yaw: y, pitch: p, data: { platform: c.platform ?? "youtube", video_id: c.video_id, title: c.title ?? "" }, scene_scale: 1 } as any
+        }
+        if (input.type === "audio") {
+          return { type: "audio", yaw: y, pitch: p, data: { url: c.url, title: c.title ?? "" }, scene_scale: 1 } as any
+        }
+        return { type: "bio-links", yaw: y, pitch: p, data: { title: c.title ?? "Links", links: c.links ?? [] }, scene_scale: 1 } as any
+      })
+      return { id: "pending" }
+    },
+    async moveMarker({ marker_id, yaw, pitch }) {
+      movedPositionsRef.current[marker_id] = { yaw, pitch }
+      await commitMarkerChanges()
+    },
+    async resizeMarker({ marker_id, scale }) {
+      const clamped = Math.min(3, Math.max(0.3, scale))
+      resizedScalesRef.current[marker_id] = clamped
+      await commitMarkerChanges()
+    },
+    async deleteMarker({ marker_id }) {
+      // Filter out the matching marker using the same ID derivation as commitMarkerChanges.
+      const idx = markersRef.current.findIndex((m, i) => {
+        const id = m.type === "profile" ? "profile-card"
+          : m.type === "video" ? `video-${(m.data as any).video_id}`
+          : m.type === "audio" ? `audio-${i}-${encodeURIComponent((m.data as any).url || "").slice(0, 24)}`
+          : m.type === "bio-links" ? `bio-links-${i}`
+          : `image-${i}`
+        return id === marker_id
+      })
+      if (idx < 0) return
+      const next = [...markersRef.current]
+      next.splice(idx, 1)
+      markersRef.current = next
+      if (onMarkersChanged) await onMarkersChanged(next)
+    },
+    async regenerateBackground(input) {
+      if (input.variants === false) {
+        await startBackgroundReroll({
+          generationId: sphereId!,
+          prompt: input.prompt,
+          styleId: input.style_id,
+          negativeText: input.negative_text,
+          highRes: input.high_res,
+        })
+        return { status: "started", job_id: sphereId!, kind: "direct" }
+      }
+      const { job_id } = await startVariantReroll({
+        generationId: sphereId!,
+        prompt: input.prompt,
+        styleId: input.style_id,
+        negativeText: input.negative_text,
+        highRes: input.high_res,
+        count: 4,
+      })
+      return { status: "started", job_id, kind: "variants" }
+    },
+    async getAnalytics({ days = 7 }) {
+      if (!sphereId) return { markers: {} }
+      const res = await fetch(`/api/events/summary?sphere_id=${sphereId}&days=${days}`)
+      if (!res.ok) return { error: "failed to fetch analytics" }
+      return await res.json()
+    },
+  }
+
   return (
     <div className="relative w-full h-[600px] rounded-xl overflow-hidden border border-white/10" style={{ zIndex: 20, isolation: "isolate" }}>
       <div ref={containerRef} className="w-full h-full" />
@@ -1081,6 +1220,32 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
                 + Add
               </button>
               <button
+                onClick={() => setRerollOpen(true)}
+                title="Regenerate the sphere background with a new prompt"
+                style={{
+                  padding: "6px 12px", fontSize: 12, borderRadius: 8,
+                  backdropFilter: "blur(8px)", cursor: "pointer", transition: "all 0.2s",
+                  border: "1px solid rgba(168,85,247,0.5)",
+                  background: "rgba(168,85,247,0.8)",
+                  color: "white",
+                }}
+              >
+                🎨 Reroll BG
+              </button>
+              <button
+                onClick={() => setCopilotOpen((v) => !v)}
+                title="Toggle copilot chat (Cmd+K)"
+                style={{
+                  padding: "6px 12px", fontSize: 12, borderRadius: 8,
+                  backdropFilter: "blur(8px)", cursor: "pointer", transition: "all 0.2s",
+                  border: copilotOpen ? "1px solid rgba(59,130,246,0.6)" : "1px solid rgba(255,255,255,0.15)",
+                  background: copilotOpen ? "rgba(59,130,246,0.8)" : "rgba(0,0,0,0.45)",
+                  color: "white",
+                }}
+              >
+                ✨ Copilot
+              </button>
+              <button
                 onClick={() => setHeatmapOn((v) => !v)}
                 title={Object.keys(eventStats).length === 0 ? "No viewer events recorded yet" : "Toggle dwell-time heatmap"}
                 style={{
@@ -1115,6 +1280,26 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
           }}
         />,
         psvHost
+      )}
+      {rerollOpen && sphereId && (
+        <RerollBackgroundModal
+          generationId={sphereId}
+          onClose={() => setRerollOpen(false)}
+          onRerolled={() => {
+            // Hard reload so the viewer picks up the new tile_stem from the
+            // generations row — markers/state are preserved by server-side storage.
+            setRerollOpen(false)
+            setTimeout(() => window.location.reload(), 800)
+          }}
+        />
+      )}
+      {copilotOpen && editMode && sphereId && psvHost && (
+        <CopilotPanel
+          sphereId={sphereId}
+          actions={copilotActions}
+          onClose={() => setCopilotOpen(false)}
+          mountHost={psvHost}
+        />
       )}
       {/* 360 toggle — lock/unlock vertical look */}
       {!loading && psvHost && createPortal(

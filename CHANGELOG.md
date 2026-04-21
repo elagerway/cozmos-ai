@@ -23,6 +23,26 @@
 
 ### Schema
 - `generations.background_prompt`, `generations.reroll_count`, `generations.last_rerolled_at` added (non-breaking)
+- New `api_costs`, `fixed_costs`, `storage_snapshots` tables
+
+### Admin cost dashboard — `/admin/costs`
+- `lib/pricing.ts` vendor price catalog with last-verified dates
+- `lib/cost-tracker.ts` server-side logger used by every API route that hits a paid external service
+- Summary cards (this month / projected / last month / all-in), 30-day daily chart, per-service + per-feature breakdowns, Claude model token usage, top-10 expensive generations, fixed-costs editor, Supabase storage snapshot (on-demand), CSV export
+- Gated via `ADMIN_PASSWORD` env var → httpOnly `admin_session` cookie (14-day TTL)
+
+### Background reroll UI — `RerollBackgroundModal`
+- "🎨 Reroll BG" button in edit mode
+- Two flows: (a) generate 4 × 8K variants → pick one → 16K export + tile swap; (b) skip-variants single-shot direct render
+- Curated style presets (Photoreal / Anime / Cinematic / Fantasy / Dreamscape / Realistic M1), negative-prompt override, Ultra HD toggle
+- `lib/pipeline-client.ts` extended with `startBackgroundReroll`, `startVariantReroll`, `getVariantJob`, `commitVariant`
+
+### Copilot chat panel — `CopilotPanel`
+- "✨ Copilot" button + Cmd/Ctrl+K toggle in edit mode; slide-out drawer on the right of the viewer
+- Claude Sonnet 4.6 (default) or Opus 4.7 via `/api/copilot/chat`
+- Client-side tool execution for `regenerate_background`, `get_profile`, `get_markers`, `get_current_view`, `get_analytics`, `add_marker`, `move_marker`, `resize_marker`, `delete_marker`, `suggest_prompts`
+- Session history persisted in sessionStorage per sphere
+- Every turn cost-logged under `feature=copilot`, session_id attached for per-conversation breakdown
 
 ### Fix: sphere tile 404s (red warning triangles on zoom)
 - Frontend `LEVELS` array in `InteractiveSphereViewer.tsx` and `SphereViewer.tsx` included a 16K tier that the pipeline no longer generates by default

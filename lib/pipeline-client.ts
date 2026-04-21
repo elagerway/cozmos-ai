@@ -61,6 +61,110 @@ export async function startUploadGeneration(
   return res.json()
 }
 
+export interface RerollBackgroundInput {
+  generationId: string
+  prompt: string
+  styleId?: number
+  negativeText?: string
+  highRes?: boolean
+}
+
+export async function startBackgroundReroll(
+  input: RerollBackgroundInput
+): Promise<{ job_id: string; new_stem: string }> {
+  const res = await fetch(`${PIPELINE_URL}/reroll-background`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      generation_id: input.generationId,
+      prompt: input.prompt,
+      style_id: input.styleId,
+      negative_text: input.negativeText,
+      high_res: input.highRes ?? false,
+    }),
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || "Failed to start background reroll")
+  }
+  return res.json()
+}
+
+export interface VariantPreview {
+  id: string
+  status: "pending" | "ready" | "failed"
+  obfuscated_id?: string | null
+  preview_url?: string | null
+  error?: string
+}
+
+export interface VariantJob {
+  job_id: string
+  gen_id: string
+  prompt: string
+  style_id?: number
+  negative_text?: string
+  high_res: boolean
+  status: "running" | "done" | "failed"
+  committed_variant_id?: string | null
+  commit_status?: "running" | "done" | "failed"
+  commit_error?: string
+  new_stem?: string
+  variants: VariantPreview[]
+}
+
+export async function startVariantReroll(input: {
+  generationId: string
+  prompt: string
+  styleId?: number
+  negativeText?: string
+  highRes?: boolean
+  count?: number
+}): Promise<{ job_id: string }> {
+  const res = await fetch(`${PIPELINE_URL}/reroll-variants`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      generation_id: input.generationId,
+      prompt: input.prompt,
+      style_id: input.styleId,
+      negative_text: input.negativeText,
+      high_res: input.highRes ?? false,
+      count: input.count ?? 4,
+    }),
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || "Failed to start variants job")
+  }
+  return res.json()
+}
+
+export async function getVariantJob(jobId: string): Promise<VariantJob> {
+  const res = await fetch(`${PIPELINE_URL}/reroll-variants/${jobId}`, { cache: "no-store" })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || "Failed to load variants")
+  }
+  return res.json()
+}
+
+export async function commitVariant(
+  jobId: string,
+  variantId: string
+): Promise<{ ok: boolean; new_stem: string }> {
+  const res = await fetch(`${PIPELINE_URL}/reroll-variants/${jobId}/commit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ variant_id: variantId }),
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || "Failed to commit variant")
+  }
+  return res.json()
+}
+
 export async function checkPipelineHealth(): Promise<boolean> {
   try {
     const res = await fetch(`${PIPELINE_URL}/health`, { signal: AbortSignal.timeout(2000) })
