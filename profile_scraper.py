@@ -543,10 +543,11 @@ async def scrape_influencer_profile(name: str) -> InfluencerProfile:
                 profile.profile_image_url = yt.profile_pic_url
                 profile.banner_image_url = yt.banner_url
 
-    # Try Instagram
+    # Try Instagram — keep any non-None result so we at least get the handle
+    # and any follower/bio data even if user_medias was restricted.
     for handle in handles:
         ig = await scrape_instagram_profile(handle)
-        if ig and (ig.bio or ig.post_images):
+        if ig:
             profile.instagram = ig
             if not profile.bio and ig.bio:
                 profile.bio = ig.bio
