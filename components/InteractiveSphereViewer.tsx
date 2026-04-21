@@ -1442,7 +1442,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
                 color: motionReduced ? "white" : "rgba(255,255,255,0.5)",
               }}
             >
-              👁 Comfort{motionReduced ? " · Reduced" : ""}
+              👁 Comfort{motionReduced ? " Enabled" : ""}
             </button>
             {comfortOpen && (
               <div
