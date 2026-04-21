@@ -1381,7 +1381,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
         />,
         psvHost
       )}
-      {rerollOpen && sphereId && (
+      {rerollOpen && sphereId && psvHost && createPortal(
         <RerollBackgroundModal
           generationId={sphereId}
           onClose={() => setRerollOpen(false)}
@@ -1391,7 +1391,8 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
             setRerollOpen(false)
             setTimeout(() => window.location.reload(), 800)
           }}
-        />
+        />,
+        psvHost
       )}
       {copilotOpen && editMode && sphereId && psvHost && (
         <CopilotPanel
@@ -1401,7 +1402,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
           mountHost={psvHost}
         />
       )}
-      {excludeOpen && (
+      {excludeOpen && psvHost && createPortal(
         <CategoryExcludeModal
           markers={copilotActions.getMarkers().map((m) => ({
             id: m.id,
@@ -1421,7 +1422,8 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
           }))}
           onClose={() => setExcludeOpen(false)}
           onApply={applyCategoryExclusion}
-        />
+        />,
+        psvHost
       )}
       {/* 360 toggle — lock/unlock vertical look */}
       {!loading && psvHost && createPortal(

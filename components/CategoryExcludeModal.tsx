@@ -1,15 +1,17 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { createPortal } from "react-dom"
 
 // Patent US '666: user input excludes categories → remaining markers are
 // repacked (via /repack-markers endpoint, which re-runs the harmony packer
 // on the subset).
+//
+// Renders as a positioned `fixed` overlay WITHOUT its own portal. The parent
+// (InteractiveSphereViewer) wraps it in createPortal(..., psvHost) so the
+// modal lives inside the fullscreen container — otherwise it renders behind
+// the fullscreened PSV element and is invisible.
 
 interface Props {
-  // markers shape from InteractiveSphereViewer — we don't depend on full MarkerDef
-  // typing because the panel reads only a few fields defensively.
   markers: Array<{
     id: string
     type: string
@@ -108,10 +110,10 @@ export function CategoryExcludeModal({ markers, onClose, onApply }: Props) {
     }
   }
 
-  return createPortal(
+  return (
     <div
       ref={backdropRef}
-      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-6"
+      className="absolute inset-0 z-[10000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-6"
     >
       <div
         className="w-full max-w-lg rounded-2xl border border-white/10 bg-neutral-950 p-6 shadow-2xl"
@@ -247,7 +249,6 @@ export function CategoryExcludeModal({ markers, onClose, onApply }: Props) {
           </div>
         </div>
       </div>
-    </div>,
-    document.body
+    </div>
   )
 }

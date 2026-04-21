@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { createPortal } from "react-dom"
 import {
   startBackgroundReroll,
   startVariantReroll,
@@ -192,10 +191,10 @@ export function RerollBackgroundModal({
 
   if (!mounted) return null
 
-  return createPortal(
+  return (
     <div
       ref={backdropRef}
-      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-6"
+      className="absolute inset-0 z-[10000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-6"
     >
       <div
         className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl border border-white/10 bg-neutral-950 p-6 shadow-2xl"
@@ -334,8 +333,7 @@ export function RerollBackgroundModal({
           <CommitProgress status={commitProgress} error={error} />
         )}
       </div>
-    </div>,
-    document.body
+    </div>
   )
 }
 
