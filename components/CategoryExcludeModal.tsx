@@ -229,8 +229,8 @@ export function CategoryExcludeModal({ markers, onClose, onApply }: Props) {
         <div className="flex items-center justify-between">
           <p className="text-xs text-white/50">
             {removedCount === 0
-              ? "No categories selected."
-              : `${removedCount} marker${removedCount === 1 ? "" : "s"} will be removed.`}
+              ? `Repack-only (strictness ${strictness.toFixed(2)})`
+              : `${removedCount} marker${removedCount === 1 ? "" : "s"} removed · repack at ${strictness.toFixed(2)}`}
           </p>
           <div className="flex gap-2">
             <button
@@ -241,10 +241,10 @@ export function CategoryExcludeModal({ markers, onClose, onApply }: Props) {
             </button>
             <button
               onClick={apply}
-              disabled={applying || removedCount === 0}
+              disabled={applying}
               className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-400 disabled:opacity-40"
             >
-              {applying ? "Repacking…" : "Apply & repack"}
+              {applying ? "Repacking…" : removedCount === 0 ? "Repack" : "Apply & repack"}
             </button>
           </div>
         </div>
