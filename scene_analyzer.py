@@ -260,6 +260,32 @@ def _pack_harmonically(markers: list[dict], strictness: float = 0.55, max_iter: 
             break
 
 
+def _parse_view_count(s: str | None) -> int:
+    """Best-effort parse of YouTube-style view strings into an int.
+
+    Inputs: "354,761 views", "2.1M views", "976K views", "1.3B views", "", None.
+    """
+    if not s:
+        return 0
+    import re
+    m = re.search(r"([\d.,]+)\s*([KkMmBb]?)", s)
+    if not m:
+        return 0
+    num_s = m.group(1).replace(",", "")
+    try:
+        num = float(num_s)
+    except ValueError:
+        return 0
+    suffix = m.group(2).lower()
+    if suffix == "k":
+        num *= 1_000
+    elif suffix == "m":
+        num *= 1_000_000
+    elif suffix == "b":
+        num *= 1_000_000_000
+    return int(num)
+
+
 def assign_content_to_positions(
     positions: list[dict],
     videos: list[dict],
@@ -271,6 +297,12 @@ def assign_content_to_positions(
     TVs get videos, frames get images, the largest/most central display gets the profile card.
     Final positions are run through `_pack_harmonically` so bounding polygons don't
     overlap and markers stay close to their designed anchors.
+
+    Patent US '565: ordering by characteristic within bands. Videos are sorted
+    by view_count descending so the most-popular content lands at the most
+    central detected TV. Strictness trade-off (US '565's "ordering vs packing"
+    tension) is resolved by applying sort BEFORE harmony pack, so popularity-
+    determined anchor points stay close to their intended slots.
     """
     markers = []
 
@@ -278,9 +310,28 @@ def assign_content_to_positions(
     tvs = [p for p in positions if p["type"] in ("tv", "display")]
     frames = [p for p in positions if p["type"] == "frame"]
 
+    # US '565 ordering: most-popular videos first so they land at most-central TVs.
+    videos = sorted(
+        list(videos),
+        key=lambda v: _parse_view_count((v or {}).get("view_count")),
+        reverse=True,
+    )
+
+    # US '580 outward packing: sort all detected positions by distance from
+    # equator centre so the sorted content lands at the most central slots first
+    # and spreads outward. Combined with US '565 ordering above, highest-
+    # engagement content gets prime placement.
+    def _centrality(p: dict) -> float:
+        yaw_d = abs(p.get("yaw", 0))
+        if yaw_d > 180:
+            yaw_d = 360 - yaw_d
+        return yaw_d + abs(p.get("pitch", 0))
+
+    tvs.sort(key=_centrality)
+    frames.sort(key=_centrality)
+
     # Find the most central TV for the profile card (closest to yaw=0, pitch=0)
     if tvs:
-        tvs.sort(key=lambda t: abs(t["yaw"]) + abs(t["pitch"]))
         profile_pos = tvs.pop(0)  # Take the most central one for profile
         markers.append({
             "type": "profile",
@@ -289,7 +340,8 @@ def assign_content_to_positions(
             "data": profile_data,
         })
 
-    # Assign videos to remaining TVs — include detected width for sizing
+    # Assign videos to remaining TVs (already sorted by centrality) — most-viewed
+    # video now lands at most-central TV.
     for i, tv in enumerate(tvs):
         if i >= len(videos):
             break
@@ -301,7 +353,7 @@ def assign_content_to_positions(
             "data": videos[i],
         })
 
-    # Assign images to frames
+    # Assign images to frames (also pre-sorted by centrality)
     for i, frame in enumerate(frames):
         if i >= len(images):
             break
@@ -316,10 +368,11 @@ def assign_content_to_positions(
             },
         })
 
-    # If we have leftover videos and no more TVs, place them at default positions
+    # If we have leftover videos and no more TVs, place them at default positions.
+    # Default yaws ordered outward-from-centre (US '580): closest to 0° first.
     assigned_video_count = min(len(tvs), len(videos))
     remaining_videos = videos[assigned_video_count:]
-    default_yaws = [-130, -70, 70, 130, -170, 170]
+    default_yaws = [-70, 70, -130, 130, -170, 170]
     for i, video in enumerate(remaining_videos[:6]):
         if i >= len(default_yaws):
             break
@@ -329,12 +382,13 @@ def assign_content_to_positions(
         if not any(_collides(candidate, m) for m in markers):
             markers.append(candidate)
 
-    # Place remaining images at default positions if not enough frames detected
+    # Place remaining images at default positions if not enough frames detected.
+    # Default image slots ordered outward-from-centre.
     assigned_image_count = min(len(frames), len(images))
     remaining_images = images[assigned_image_count:]
     default_img_positions = [
-        {"yaw": -60, "pitch": 14}, {"yaw": -20, "pitch": 16},
-        {"yaw": 20, "pitch": 16}, {"yaw": 60, "pitch": 14},
+        {"yaw": -20, "pitch": 16}, {"yaw": 20, "pitch": 16},
+        {"yaw": -60, "pitch": 14}, {"yaw": 60, "pitch": 14},
         {"yaw": -100, "pitch": 12}, {"yaw": 100, "pitch": 12},
     ]
     for i, img_url in enumerate(remaining_images[:6]):
