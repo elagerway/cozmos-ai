@@ -45,10 +45,11 @@
 - Every turn cost-logged under `feature=copilot`, session_id attached for per-conversation breakdown
 
 ### Category exclusion + repack (patent US '666)
-- New `POST /repack-markers` pipeline endpoint — accepts markers + `excluded_types` / `excluded_platforms` / `excluded_tags` / `strictness`, filters, re-runs `_pack_harmonically` on the kept subset so remaining markers spread into the freed space
-- `CategoryExcludeModal.tsx` — checkbox UI with live counts per category + strictness slider
+- New `POST /repack-markers` pipeline endpoint — filters markers by `excluded_types` / `excluded_platforms` / `excluded_tags` / `strictness`, re-runs `_pack_harmonically` on the kept subset so remaining markers spread into the freed space with anchor-pull + collision resolution
+- `CategoryExcludeModal.tsx` — checkbox UI with live per-category counts + strictness slider
 - "🚫 Categories" button in edit toolbar
 - Copilot tool `exclude_categories` so the user can say things like "hide all my audio markers" or "drop the vimeo videos" conversationally
+- `lib/pipeline-client.ts` extended with `repackMarkers`
 
 ### Anti-distortion camera rig — patents EP '953 / CN '718 / US '579
 - New `lib/viewer-camera.ts:attachAntiDistortionRig()` attaches six independent anti-sickness behaviors to any PSV instance

@@ -127,6 +127,35 @@ export const COPILOT_TOOLS: Tool[] = [
     },
   },
   {
+    name: "exclude_categories",
+    description:
+      "Remove markers belonging to one or more categories (by type, video platform, or tag), then re-pack the remaining markers so they spread into the freed space. Patent US '666. Use when the user wants to hide classes of content (e.g. 'hide all my audio markers', 'remove sponsored posts', 'drop the vimeo videos').",
+    input_schema: {
+      type: "object",
+      properties: {
+        types: {
+          type: "array",
+          items: { type: "string", enum: ["profile", "video", "audio", "image", "bio-links"] },
+          description: "Marker types to exclude.",
+        },
+        platforms: {
+          type: "array",
+          items: { type: "string" },
+          description: "Video platforms to exclude (youtube, vimeo, etc). Only applies to video markers.",
+        },
+        tags: {
+          type: "array",
+          items: { type: "string" },
+          description: "Tags to exclude — any marker with a matching tag is removed.",
+        },
+        strictness: {
+          type: "number",
+          description: "0..1. Higher = remaining markers stay closer to their original anchors during repack. Default 0.55.",
+        },
+      },
+    },
+  },
+  {
     name: "suggest_prompts",
     description:
       "Generate 3 improved Skybox prompts from a vague or short user intent. Returns an array of {title, prompt, style_id, rationale} objects the user can pick from. Use this when the user asks for ideas or their prompt is too generic (<10 words, no spatial cues).",

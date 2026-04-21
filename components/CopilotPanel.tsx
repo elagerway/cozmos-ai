@@ -21,6 +21,12 @@ export interface CopilotActions {
     high_res?: boolean
   }): Promise<{ status: "started"; job_id: string; kind: "direct" | "variants" }>
   getAnalytics(input: { days?: number }): Promise<unknown>
+  excludeCategories(input: {
+    types?: string[]
+    platforms?: string[]
+    tags?: string[]
+    strictness?: number
+  }): Promise<void>
 }
 
 interface Props {
@@ -84,6 +90,18 @@ export function CopilotPanel({ sphereId, actions, onClose, mountHost }: Props) {
           case "get_analytics": {
             const data = await actions.getAnalytics({ days: Number(args.days ?? 7) })
             return { result: JSON.stringify(data) }
+          }
+          case "exclude_categories": {
+            const types = Array.isArray(args.types) ? args.types.map(String) : []
+            const platforms = Array.isArray(args.platforms) ? args.platforms.map(String) : []
+            const tags = Array.isArray(args.tags) ? args.tags.map(String) : []
+            await actions.excludeCategories({
+              types,
+              platforms,
+              tags,
+              strictness: args.strictness !== undefined ? Number(args.strictness) : 0.55,
+            })
+            return { result: JSON.stringify({ ok: true }) }
           }
           case "add_marker": {
             const res = await actions.addMarker({

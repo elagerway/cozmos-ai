@@ -165,6 +165,37 @@ export async function commitVariant(
   return res.json()
 }
 
+export interface RepackInput {
+  markers: Array<{
+    id: string
+    type: string
+    yaw: number
+    pitch: number
+    scene_width?: number
+    platform?: string
+    tags?: string[]
+  }>
+  excluded_types?: string[]
+  excluded_platforms?: string[]
+  excluded_tags?: string[]
+  strictness?: number
+}
+
+export async function repackMarkers(
+  input: RepackInput
+): Promise<{ kept: Array<{ id: string; yaw: number; pitch: number }>; removed_ids: string[]; strictness: number }> {
+  const res = await fetch(`${PIPELINE_URL}/repack-markers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || "Failed to repack markers")
+  }
+  return res.json()
+}
+
 export async function checkPipelineHealth(): Promise<boolean> {
   try {
     const res = await fetch(`${PIPELINE_URL}/health`, { signal: AbortSignal.timeout(2000) })

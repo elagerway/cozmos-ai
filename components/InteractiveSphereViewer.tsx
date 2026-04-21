@@ -7,7 +7,8 @@ import "@photo-sphere-viewer/markers-plugin/index.css"
 import { AddMarkerModal } from "./AddMarkerModal"
 import { RerollBackgroundModal } from "./RerollBackgroundModal"
 import { CopilotPanel, type CopilotActions } from "./CopilotPanel"
-import { startBackgroundReroll, startVariantReroll } from "@/lib/pipeline-client"
+import { CategoryExcludeModal } from "./CategoryExcludeModal"
+import { startBackgroundReroll, startVariantReroll, repackMarkers } from "@/lib/pipeline-client"
 import { attachAntiDistortionRig } from "@/lib/viewer-camera"
 import { useEventTracker } from "@/lib/event-tracker"
 
@@ -331,6 +332,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
     return window.localStorage.getItem("biosphere_motion_reduced") === "1"
   })
   const [comfortOpen, setComfortOpen] = useState(false)
+  const [excludeOpen, setExcludeOpen] = useState(false)
   // Heatmap + top-viewed overlays (patent GB '335 / US '706).
   const [heatmapOn, setHeatmapOn] = useState(false)
   const [eventStats, setEventStats] = useState<Record<string, { selects: number; dwell_ms: number; dwell_rank: number; select_rank: number }>>({})
@@ -1022,6 +1024,69 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
     return () => window.removeEventListener("keydown", onKey)
   }, [editMode])
 
+  // Shared repack-after-exclusion handler used by the Categories modal AND the
+  // copilot's exclude_categories tool. Filters markers by the excluded sets,
+  // calls /repack-markers to get new yaw/pitch for the kept subset, then
+  // commits the reduced+repositioned marker list via onMarkersChanged.
+  const applyCategoryExclusion = async (excluded: {
+    types: string[]
+    platforms: string[]
+    tags: string[]
+    strictness: number
+  }) => {
+    const current = markersRef.current
+    const excludedTypes = new Set(excluded.types)
+    const excludedPlatforms = new Set(excluded.platforms)
+    const excludedTags = new Set(excluded.tags)
+
+    const idFor = (m: any, i: number): string =>
+      m.type === "profile" ? "profile-card"
+      : m.type === "video" ? `video-${(m.data as any).video_id}`
+      : m.type === "audio" ? `audio-${i}-${encodeURIComponent((m.data as any).url || "").slice(0, 24)}`
+      : m.type === "bio-links" ? `bio-links-${i}`
+      : `image-${i}`
+
+    const designWidthFor = (t: string) =>
+      t === "profile" ? 320 : t === "video" ? 360 : t === "image" ? 160 : t === "audio" ? 280 : 300
+
+    const packerInput = current.map((m: any, i: number) => ({
+      id: idFor(m, i),
+      type: m.type,
+      yaw: m.yaw,
+      pitch: m.pitch,
+      scene_width: m.scene_width ?? designWidthFor(m.type),
+      platform: m.type === "video" ? (m.data?.platform ?? null) : null,
+      tags: m.tags ?? [],
+    }))
+
+    const { kept } = await repackMarkers({
+      markers: packerInput,
+      excluded_types: [...excludedTypes],
+      excluded_platforms: [...excludedPlatforms],
+      excluded_tags: [...excludedTags],
+      strictness: excluded.strictness,
+    })
+
+    // Build a yaw/pitch lookup from the packer result, then rebuild the
+    // marker array keeping only non-excluded markers at their new positions.
+    const posById = new Map(kept.map((k) => [k.id, { yaw: k.yaw, pitch: k.pitch }]))
+    const repacked = current.filter((m: any, i: number) => {
+      const id = idFor(m, i)
+      if (excludedTypes.has(m.type)) return false
+      if (m.type === "video" && m.data?.platform && excludedPlatforms.has(m.data.platform)) return false
+      const tags: string[] = m.tags ?? []
+      if (tags.some((t) => excludedTags.has(t))) return false
+      return posById.has(id)
+    }).map((m: any, i: number) => {
+      const id = idFor(m, i)
+      const p = posById.get(id)
+      return p ? { ...m, yaw: p.yaw, pitch: p.pitch } : m
+    })
+
+    markersRef.current = repacked
+    if (onMarkersChanged) await onMarkersChanged(repacked)
+  }
+
   // Build the imperative actions the copilot panel can invoke.
   const copilotActions: CopilotActions = {
     getProfile() {
@@ -1140,6 +1205,14 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
       if (!res.ok) return { error: "failed to fetch analytics" }
       return await res.json()
     },
+    async excludeCategories(input) {
+      await applyCategoryExclusion({
+        types: input.types ?? [],
+        platforms: input.platforms ?? [],
+        tags: input.tags ?? [],
+        strictness: input.strictness ?? 0.55,
+      })
+    },
   }
 
   return (
@@ -1247,6 +1320,19 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
                 🎨 Reroll BG
               </button>
               <button
+                onClick={() => setExcludeOpen(true)}
+                title="Exclude categories and re-pack markers (patent US '666)"
+                style={{
+                  padding: "6px 12px", fontSize: 12, borderRadius: 8,
+                  backdropFilter: "blur(8px)", cursor: "pointer", transition: "all 0.2s",
+                  border: "1px solid rgba(250,204,21,0.5)",
+                  background: "rgba(250,204,21,0.8)",
+                  color: "black",
+                }}
+              >
+                🚫 Categories
+              </button>
+              <button
                 onClick={() => setCopilotOpen((v) => !v)}
                 title="Toggle copilot chat (Cmd+K)"
                 style={{
@@ -1313,6 +1399,28 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
           actions={copilotActions}
           onClose={() => setCopilotOpen(false)}
           mountHost={psvHost}
+        />
+      )}
+      {excludeOpen && (
+        <CategoryExcludeModal
+          markers={copilotActions.getMarkers().map((m) => ({
+            id: m.id,
+            type: m.type,
+            platform: (() => {
+              const found = markersRef.current.find((x: any, i: number) => {
+                const id = x.type === "profile" ? "profile-card"
+                  : x.type === "video" ? `video-${(x.data as any).video_id}`
+                  : x.type === "audio" ? `audio-${i}-${encodeURIComponent((x.data as any).url || "").slice(0, 24)}`
+                  : x.type === "bio-links" ? `bio-links-${i}`
+                  : `image-${i}`
+                return id === m.id
+              }) as any
+              return found?.data?.platform ?? null
+            })(),
+            tags: ((markersRef.current.find((x: any) => (x as any).id === m.id) as any)?.tags) ?? [],
+          }))}
+          onClose={() => setExcludeOpen(false)}
+          onApply={applyCategoryExclusion}
         />
       )}
       {/* 360 toggle — lock/unlock vertical look */}
