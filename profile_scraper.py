@@ -463,15 +463,21 @@ async def scrape_instagram_profile(handle: str) -> InstagramData | None:
             follower_count=user_info.follower_count or 0,
         )
 
-        # Get recent posts
-        medias = cl.user_medias(user_id, amount=12)
-        for media in medias:
-            if media.media_type == 1 and media.thumbnail_url:  # Photo
-                data.post_images.append(str(media.thumbnail_url))
-            elif media.media_type == 8 and media.resources:  # Carousel
-                for resource in media.resources[:2]:
-                    if resource.thumbnail_url:
-                        data.post_images.append(str(resource.thumbnail_url))
+        # Get recent posts — optional; user_medias uses a stricter private
+        # endpoint that can fail with "Not authorized to view user" even when
+        # user_info succeeded (e.g. account restrictions or rate limiting).
+        # Return partial profile data in that case instead of discarding the scrape.
+        try:
+            medias = cl.user_medias(user_id, amount=12)
+            for media in medias:
+                if media.media_type == 1 and media.thumbnail_url:  # Photo
+                    data.post_images.append(str(media.thumbnail_url))
+                elif media.media_type == 8 and media.resources:  # Carousel
+                    for resource in media.resources[:2]:
+                        if resource.thumbnail_url:
+                            data.post_images.append(str(resource.thumbnail_url))
+        except Exception as e:
+            print(f"  Instagram user_medias({user_id}) failed: {type(e).__name__}: {e} — continuing with profile-only data")
 
         print(f"  Instagram: {data.name} (@{handle}), {data.follower_count} followers, {len(data.post_images)} images")
         return data
