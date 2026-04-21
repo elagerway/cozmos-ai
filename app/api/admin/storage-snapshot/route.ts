@@ -11,7 +11,7 @@ const BUCKET = "spheres"
 // a storage_snapshots row. Supabase storage.list() is paginated, so this may
 // take a few seconds for a large bucket.
 async function walkBucket(
-  sb: ReturnType<typeof createClient>,
+  sb: ReturnType<typeof createClient<any, any, any>>,
   prefix: string,
   counters: { objects: number; bytes: number }
 ): Promise<void> {

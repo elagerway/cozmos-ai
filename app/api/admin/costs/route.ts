@@ -108,7 +108,7 @@ export async function GET(_req: NextRequest) {
   const serviceMap = new Map<string, ServiceTotal>()
   for (const r of thisMonthRows) {
     const key = r.service
-    const existing = serviceMap.get(key) ?? { service: key, cost_usd: 0, calls: 0 }
+    const existing: ServiceTotal = serviceMap.get(key) ?? { service: key, cost_usd: 0, calls: 0 }
     existing.cost_usd += Number(r.cost_usd || 0)
     existing.calls += 1
     if (r.unit_type === "tokens") {

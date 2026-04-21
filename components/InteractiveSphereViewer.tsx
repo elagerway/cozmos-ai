@@ -696,7 +696,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
 
         // Attach the anti-distortion camera rig as soon as the viewer is live.
         // Store cleanup on the viewer so the top-level effect teardown runs it.
-        const detachRig = attachAntiDistortionRig(viewer, { motionReduced })
+        const detachRig = attachAntiDistortionRig(viewer as any, { motionReduced })
         ;(viewer as any).__biosphereRigCleanup = detachRig
 
         const markersPlugin = viewer.getPlugin(MarkersPlugin) as any
@@ -1474,7 +1474,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
                       if (viewerRef.current) {
                         try {
                           (viewerRef.current as any).__biosphereRigCleanup?.()
-                          const rig = attachAntiDistortionRig(viewerRef.current, { motionReduced: next })
+                          const rig = attachAntiDistortionRig(viewerRef.current as any, { motionReduced: next })
                           ;(viewerRef.current as any).__biosphereRigCleanup = rig
                         } catch {}
                       }
