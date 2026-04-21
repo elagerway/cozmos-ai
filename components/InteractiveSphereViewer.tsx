@@ -314,9 +314,71 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
   const [psvHost, setPsvHost] = useState<HTMLElement | null>(null)
   const [saving, setSaving] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
+  // Heatmap + top-viewed overlays (patent GB '335 / US '706).
+  const [heatmapOn, setHeatmapOn] = useState(false)
+  const [eventStats, setEventStats] = useState<Record<string, { selects: number; dwell_ms: number; dwell_rank: number; select_rank: number }>>({})
   // Keep the latest markers prop reachable from refs-only closures (onMarkersChanged commit).
   const markersRef = useRef(markers)
   useEffect(() => { markersRef.current = markers }, [markers])
+
+  // Toggle the heatmap class on psv-container whenever heatmapOn flips.
+  useEffect(() => {
+    const host = containerRef.current?.querySelector(".psv-container")
+    if (!host) return
+    host.classList.toggle("biosphere-heatmap-on", heatmapOn)
+  }, [heatmapOn, psvHost])
+
+  // Fetch aggregated event stats (patent GB '335 / US '706). Refreshed on mount
+  // + every 30s while in edit mode so heatmap/toggle stays current.
+  useEffect(() => {
+    if (!sphereId) return
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/events/summary?sphere_id=${encodeURIComponent(sphereId)}&days=30`)
+        if (!res.ok || cancelled) return
+        const json = await res.json()
+        if (!cancelled) setEventStats(json.markers || {})
+      } catch {}
+    }
+    load()
+    const interval = editMode ? window.setInterval(load, 30000) : null
+    return () => {
+      cancelled = true
+      if (interval) window.clearInterval(interval)
+    }
+  }, [sphereId, editMode])
+
+  // Paint data-* attributes onto marker DOM elements whenever stats update or
+  // markers (re)render. CSS selectors consume these for heatmap glow + badges.
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const paint = () => {
+      document.querySelectorAll<HTMLElement>(".psv-marker").forEach((el) => {
+        const id = el.id.replace(/^psv-marker-/, "")
+        const s = eventStats[id]
+        if (s && s.dwell_ms > 0) {
+          // 0 = most dwelt; clamp rank to 0..9 for CSS tiers
+          el.setAttribute("data-dwell-rank", String(Math.min(9, s.dwell_rank)))
+          el.setAttribute("data-dwell-ms", String(s.dwell_ms))
+          el.setAttribute("data-selects", String(s.selects))
+          if (s.dwell_rank < 3) el.setAttribute("data-top-viewed", String(s.dwell_rank + 1))
+          else el.removeAttribute("data-top-viewed")
+        } else {
+          el.removeAttribute("data-dwell-rank")
+          el.removeAttribute("data-dwell-ms")
+          el.removeAttribute("data-selects")
+          el.removeAttribute("data-top-viewed")
+        }
+      })
+    }
+    paint()
+    // Re-paint when PSV adds/moves markers — cheap, idempotent.
+    const obs = new MutationObserver(paint)
+    const host = containerRef.current?.querySelector(".psv-container")
+    if (host) obs.observe(host, { childList: true, subtree: true })
+    return () => obs.disconnect()
+  }, [eventStats, ready])
 
   const addMarkerAtCurrentView = async (builder: (yawDeg: number, pitchDeg: number) => MarkerDef) => {
     const viewer: any = viewerRef.current
@@ -399,6 +461,51 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
         .biosphere-edit-mode .psv-marker:hover {
           outline-color: rgba(59,130,246,0.8) !important;
         }
+
+        /* ---- Patent GB '335 / US '706: heatmap + top-viewed overlays ---- */
+
+        /* Top-viewed badge: 1 = ⭐⭐⭐, 2 = ⭐⭐, 3 = ⭐ — always visible in public view. */
+        .psv-marker[data-top-viewed]::after {
+          content: attr(data-top-viewed-stars);
+          position: absolute;
+          top: -10px;
+          right: -10px;
+          background: linear-gradient(135deg, #fbbf24, #f97316);
+          color: white;
+          font-size: 11px;
+          font-weight: 700;
+          padding: 3px 8px;
+          border-radius: 9999px;
+          border: 2px solid white;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+          font-family: Inter, system-ui, sans-serif;
+          white-space: nowrap;
+          pointer-events: none;
+          z-index: 5;
+        }
+        .psv-marker[data-top-viewed="1"] { --stars: "⭐⭐⭐"; }
+        .psv-marker[data-top-viewed="2"] { --stars: "⭐⭐"; }
+        .psv-marker[data-top-viewed="3"] { --stars: "⭐"; }
+        .psv-marker[data-top-viewed="1"]::after { content: "⭐⭐⭐ #1"; }
+        .psv-marker[data-top-viewed="2"]::after { content: "⭐⭐ #2"; }
+        .psv-marker[data-top-viewed="3"]::after { content: "⭐ #3"; }
+
+        /* Heatmap mode: colored glow whose hue maps to dwell rank.
+           Only visible while in edit mode AND the Heatmap toggle is on. */
+        .biosphere-edit-mode.biosphere-heatmap-on .psv-marker[data-dwell-rank] {
+          outline: 3px solid transparent !important;
+          filter: drop-shadow(0 0 20px var(--heat-color, rgba(59,130,246,0.5)));
+        }
+        .biosphere-edit-mode.biosphere-heatmap-on .psv-marker[data-dwell-rank="0"] { --heat-color: rgba(239, 68, 68, 0.9); }   /* red */
+        .biosphere-edit-mode.biosphere-heatmap-on .psv-marker[data-dwell-rank="1"] { --heat-color: rgba(249, 115, 22, 0.85); } /* orange */
+        .biosphere-edit-mode.biosphere-heatmap-on .psv-marker[data-dwell-rank="2"] { --heat-color: rgba(234, 179, 8, 0.8); }   /* amber */
+        .biosphere-edit-mode.biosphere-heatmap-on .psv-marker[data-dwell-rank="3"] { --heat-color: rgba(163, 230, 53, 0.75); } /* lime */
+        .biosphere-edit-mode.biosphere-heatmap-on .psv-marker[data-dwell-rank="4"] { --heat-color: rgba(34, 197, 94, 0.7); }   /* green */
+        .biosphere-edit-mode.biosphere-heatmap-on .psv-marker[data-dwell-rank="5"],
+        .biosphere-edit-mode.biosphere-heatmap-on .psv-marker[data-dwell-rank="6"],
+        .biosphere-edit-mode.biosphere-heatmap-on .psv-marker[data-dwell-rank="7"],
+        .biosphere-edit-mode.biosphere-heatmap-on .psv-marker[data-dwell-rank="8"],
+        .biosphere-edit-mode.biosphere-heatmap-on .psv-marker[data-dwell-rank="9"] { --heat-color: rgba(14, 165, 233, 0.6); }  /* blue */
 
         /* Selected marker: solid blue border */
         .psv-marker.biosphere-selected {
@@ -968,6 +1075,19 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
                 }}
               >
                 + Add
+              </button>
+              <button
+                onClick={() => setHeatmapOn((v) => !v)}
+                title={Object.keys(eventStats).length === 0 ? "No viewer events recorded yet" : "Toggle dwell-time heatmap"}
+                style={{
+                  padding: "6px 12px", fontSize: 12, borderRadius: 8,
+                  backdropFilter: "blur(8px)", cursor: "pointer", transition: "all 0.2s",
+                  border: heatmapOn ? "1px solid rgba(239,68,68,0.6)" : "1px solid rgba(255,255,255,0.15)",
+                  background: heatmapOn ? "rgba(239,68,68,0.8)" : "rgba(0,0,0,0.45)",
+                  color: "white",
+                }}
+              >
+                🔥 Heatmap {heatmapOn ? "On" : "Off"}
               </button>
               <span style={{
                 padding: "4px 8px", fontSize: 10, borderRadius: 6,
