@@ -2,10 +2,32 @@
 
 ## 2026-04-21
 
+### Cost tracking instrumentation
+- New `cost_tracker.py` mirrors `mockup/lib/cost-tracker.ts` — posts to Supabase `api_costs` table on every billable external call
+- `sphere_gen.generate_skybox()` now logs per-step (8K generate + 16K export), attributed to `generation_id` + `feature`
+- `server.upscale_image_fal()` logs per-call priced by output megapixels (4× input area)
+- `scene_analyzer.detect_scene_elements()` logs Claude Vision token usage
+- All callers thread `gen_id` through so cost rows link back to the generation row they belong to
+
+### Background reroll endpoint — `POST /reroll-background`
+- Regenerates only the sphere background; markers and everything else preserved
+- Writes tiles under a versioned stem (`{gen_id}-rr{timestamp}`) so old tiles stay accessible during the swap
+- Single atomic PATCH updates `generations.tile_stem` / `image_url` / `background_prompt` / `reroll_count` / `last_rerolled_at`
+- Cost-logged under `feature=bg_reroll`
+
+### Variant picker — `POST /reroll-variants`, `GET /reroll-variants/{id}`, `POST /reroll-variants/{id}/commit`
+- Generates N × 8K Skybox previews in parallel (no 16K export, no tile pyramid — cheap)
+- User picks one → commit endpoint runs the 16K export + tile pyramid + atomic swap on the chosen variant
+- `sphere_gen.generate_skybox_8k()` + `sphere_gen.export_skybox_16k()` split out from `generate_skybox()` for reuse
+- Cost-logged: previews under `feature=variants_preview`, commit under `feature=bg_reroll`
+
+### Schema
+- `generations.background_prompt`, `generations.reroll_count`, `generations.last_rerolled_at` added (non-breaking)
+
 ### Fix: sphere tile 404s (red warning triangles on zoom)
-- Frontend `LEVELS` array in `InteractiveSphereViewer.tsx` and `SphereViewer.tsx` included a 16K tier (`width: 16384, cols: 16, rows: 8`) that the pipeline no longer generates by default
+- Frontend `LEVELS` array in `InteractiveSphereViewer.tsx` and `SphereViewer.tsx` included a 16K tier that the pipeline no longer generates by default
 - With `high_res=false` (Ultra HD checkbox off, the default), `pipeline/server.py generate_tiles()` produces 3 tiers — 2K, 4K, 8K — so PSV requests for the 4th tier 404'd and painted red warning triangles
-- Removed the 16K tier from both viewers; frontend pyramid now matches pipeline output. Users who opt into high_res still get all 4 tiers (pipeline decides; frontend just walks what exists)
+- Removed the 16K tier from both viewers; frontend pyramid now matches pipeline output. Users who opt into high_res still get all 4 tiers
 
 ## 2026-04-16 (late session)
 

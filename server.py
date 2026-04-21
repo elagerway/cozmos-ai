@@ -13,6 +13,7 @@ import os
 import sys
 import time
 import uuid
+from datetime import datetime, timezone
 import shutil
 import asyncio
 import base64
@@ -25,6 +26,7 @@ import pyvips
 pyvips.cache_set_max_mem(100 * 1024 * 1024)  # 100MB cache max
 pyvips.cache_set_max(50)
 import httpx
+from cost_tracker import log_fal_esrgan
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -75,6 +77,13 @@ app.mount("/spheres", StaticFiles(directory=str(SPHERES_DIR)), name="spheres")
 # Track generation status
 generations: dict[str, dict] = {}
 executor = ThreadPoolExecutor(max_workers=2)
+
+# Variant-picker state: job_id -> {
+#   gen_id, prompt, style_id, negative_text, high_res, status,
+#   variants: [{ id, obfuscated_id, preview_url, status, error? }]
+# }
+# In-memory only — dropped on restart (accepted tradeoff for PR #2).
+variants_cache: dict[str, dict] = {}
 
 
 async def crawl_internal_links(url: str) -> list[str]:
@@ -472,12 +481,24 @@ async def scrape_brand_images(brand: str) -> list[bytes]:
     return []
 
 
-async def upscale_image_fal(img_bytes: bytes) -> bytes:
-    """4x upscale a single image via fal.ai API."""
+async def upscale_image_fal(
+    img_bytes: bytes,
+    *,
+    generation_id: str | None = None,
+    feature: str = "initial_gen",
+    image_kind: str | None = None,
+) -> bytes:
+    """4x upscale a single image via fal.ai API.
+
+    Logs cost attributed to generation_id/feature based on output megapixels
+    (input w*h * 16 for 4x upscale).
+    """
     # Convert to PNG for upload
     img = Image.open(BytesIO(img_bytes))
     if img.mode == "RGBA":
         img = img.convert("RGB")
+    input_w, input_h = img.size
+    output_megapixels = (input_w * input_h * 16) / 1_000_000
     buf = BytesIO()
     img.save(buf, format="PNG")
     b64 = base64.b64encode(buf.getvalue()).decode()
@@ -526,10 +547,23 @@ async def upscale_image_fal(img_bytes: bytes) -> bytes:
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         img_resp = await client.get(image_url)
+        log_fal_esrgan(
+            output_megapixels=output_megapixels,
+            generation_id=generation_id,
+            feature=feature,  # type: ignore[arg-type]
+            image_kind=image_kind,
+        )
         return img_resp.content
 
 
-async def upscale_all_parallel(images: list[bytes], on_progress=None) -> list[bytes]:
+async def upscale_all_parallel(
+    images: list[bytes],
+    on_progress=None,
+    *,
+    generation_id: str | None = None,
+    feature: str = "initial_gen",
+    image_kind: str | None = None,
+) -> list[bytes]:
     """Upscale all images via fal.ai, 4 at a time to limit memory."""
     results: list[bytes] = []
     completed = 0
@@ -537,7 +571,12 @@ async def upscale_all_parallel(images: list[bytes], on_progress=None) -> list[by
 
     async def upscale_one(img):
         async with sem:
-            return await upscale_image_fal(img)
+            return await upscale_image_fal(
+                img,
+                generation_id=generation_id,
+                feature=feature,
+                image_kind=image_kind,
+            )
 
     tasks = [upscale_one(img) for img in images]
 
@@ -848,7 +887,11 @@ def run_pipeline(gen_id: str, brand: str, source_url: str = ""):
                     elif status == "exporting_16k":
                         update("upscale", 55, "Exporting 16K...")
                 canvas = loop.run_until_complete(
-                    generate_sphere_from_prompt(prompt_text, on_progress=on_ai_progress)
+                    generate_sphere_from_prompt(
+                        prompt_text,
+                        on_progress=on_ai_progress,
+                        generation_id=gen_id,
+                    )
                 )
                 update("compose", 70, "AI environment generated")
                 loop.close()
@@ -924,7 +967,11 @@ def run_pipeline(gen_id: str, brand: str, source_url: str = ""):
                     update("upscale", 55, "Processing 16K export...")
 
             environment = loop.run_until_complete(
-                generate_sphere_from_prompt(blockade_prompt, on_progress=on_env_progress)
+                generate_sphere_from_prompt(
+                    blockade_prompt,
+                    on_progress=on_env_progress,
+                    generation_id=gen_id,
+                )
             )
             update("upscale", 58, "16K environment ready")
 
@@ -935,7 +982,12 @@ def run_pipeline(gen_id: str, brand: str, source_url: str = ""):
 
             update("upscale", 58, f"Enhancing {len(raw_images)} images...")
             upscaled = loop.run_until_complete(
-                upscale_all_parallel(raw_images, on_progress=on_upscale_progress)
+                upscale_all_parallel(
+                    raw_images,
+                    on_progress=on_upscale_progress,
+                    generation_id=gen_id,
+                    image_kind="scraped_thumbnail",
+                )
             )
             update("upscale", 65, f"Enhanced {len(upscaled)} images")
 
@@ -951,7 +1003,12 @@ def run_pipeline(gen_id: str, brand: str, source_url: str = ""):
 
             update("upscale", 12, f"Enhancing {len(raw_images)} images (GPU)...")
             upscaled = loop.run_until_complete(
-                upscale_all_parallel(raw_images, on_progress=on_upscale_progress)
+                upscale_all_parallel(
+                    raw_images,
+                    on_progress=on_upscale_progress,
+                    generation_id=gen_id,
+                    image_kind="scraped_thumbnail",
+                )
             )
             update("upscale", 65, f"Enhanced {len(upscaled)} images")
 
@@ -1117,14 +1174,18 @@ async def generate_about_me(body: dict):
                     update("compose", 52, "Processing 16K export...")
 
             environment = loop.run_until_complete(
-                generate_sphere_from_prompt(blockade_prompt, on_progress=on_env_progress)
+                generate_sphere_from_prompt(
+                    blockade_prompt,
+                    on_progress=on_env_progress,
+                    generation_id=gen_id,
+                )
             )
             update("compose", 55, "Environment ready, analyzing scene...")
 
             # Analyze the scene to find TV screens and picture frames
             from scene_analyzer import detect_scene_elements, assign_content_to_positions
             env_jpg = environment.resize(4096 / environment.width, kernel=pyvips.enums.Kernel.LANCZOS3, vscale=2048 / environment.height).write_to_buffer(".jpg[Q=80]")
-            scene_elements = loop.run_until_complete(detect_scene_elements(env_jpg))
+            scene_elements = loop.run_until_complete(detect_scene_elements(env_jpg, generation_id=gen_id))
             update("compose", 62, f"Found {len(scene_elements)} display surfaces")
 
             # All content displayed via interactive markers — no compositing.
@@ -1369,7 +1430,11 @@ async def generate_from_prompt(body: dict):
 
             loop = asyncio.new_event_loop()
             canvas = loop.run_until_complete(
-                generate_sphere_from_prompt(prompt, on_progress=on_skybox_progress)
+                generate_sphere_from_prompt(
+                    prompt,
+                    on_progress=on_skybox_progress,
+                    generation_id=gen_id,
+                )
             )
             loop.close()
             update("compose", 70, "16K panorama ready")
@@ -1436,6 +1501,366 @@ async def generate_from_prompt(body: dict):
     })
     executor.submit(run_prompt_pipeline, gen_id, prompt)
     return {"id": gen_id}
+
+
+@app.post("/reroll-background")
+async def reroll_background(body: dict):
+    """Regenerate just the background for an existing generation.
+
+    Markers, scene analysis, and all other generation state are preserved —
+    only the Skybox background (and its tile pyramid) is replaced.
+
+    Uses a versioned tile_stem so old tiles remain accessible during the swap
+    and are only updated atomically once all new uploads complete.
+
+    Body:
+        generation_id: str — existing gen id to reroll
+        prompt: str        — new Skybox prompt
+        style_id: int?     — Blockade Labs style id (default 119 = M3 Photoreal)
+        negative_text: str? — override negative prompt
+        high_res: bool?    — if true, emit 16K tile tier (slower, sharper on extreme zoom)
+
+    Returns { "job_id": "<generation_id>" } — poll /generate/<id> for progress,
+    same as /generate-from-prompt.
+    """
+    gen_id = body.get("generation_id", "").strip()
+    prompt = body.get("prompt", "").strip()
+    style_id = body.get("style_id")
+    negative_text = body.get("negative_text")
+    high_res = bool(body.get("high_res", False))
+
+    if not gen_id:
+        return JSONResponse({"error": "generation_id required"}, status_code=400)
+    if not prompt:
+        return JSONResponse({"error": "prompt required"}, status_code=400)
+
+    # Versioned stem → old tiles stay in storage during swap and as rollback point.
+    new_stem = f"{gen_id}-rr{int(time.time())}"
+
+    generations[gen_id] = generations.get(gen_id, {"id": gen_id})
+    generations[gen_id].update({
+        "status": "running",
+        "step": "scrape",
+        "pct": 2,
+        "label": "Queuing background reroll...",
+    })
+
+    def run_reroll(gen_id: str, prompt: str, new_stem: str):
+        start = time.time()
+
+        def update(step: str, pct: int, label: str):
+            generations[gen_id].update({"step": step, "pct": pct, "label": label})
+            update_generation_status(gen_id, {"step": step, "step_label": label})
+
+        try:
+            from sphere_gen import generate_sphere_from_prompt
+
+            update("scrape", 5, "Preparing reroll...")
+
+            def on_skybox_progress(status):
+                if status == "pending":
+                    update("scrape", 10, "Queued for generation...")
+                elif status == "dispatched":
+                    update("scrape", 20, "AI rendering new background...")
+                elif status == "processing":
+                    update("upscale", 40, "Rendering 8K panorama...")
+                elif status == "exporting_16k":
+                    update("upscale", 55, "Exporting native 16K...")
+                elif status.startswith("export_"):
+                    update("compose", 60, "Processing 16K export...")
+
+            loop = asyncio.new_event_loop()
+            canvas = loop.run_until_complete(
+                generate_sphere_from_prompt(
+                    prompt,
+                    on_progress=on_skybox_progress,
+                    generation_id=gen_id,
+                    feature="bg_reroll",
+                    style_id=style_id,
+                    negative_text=negative_text,
+                )
+            )
+            loop.close()
+            update("compose", 70, "16K panorama ready")
+
+            # Tile pyramid to a NEW versioned stem — old tiles untouched.
+            def on_tile_progress(done, total):
+                pct = 72 + int(23 * (done / total))
+                update("tiles", pct, f"Generating tiles ({done}/{total})...")
+
+            update("tiles", 72, "Generating tile pyramid...")
+            generate_tiles(canvas, new_stem, on_progress=on_tile_progress, high_res=high_res)
+            update("tiles", 95, "Tiles generated")
+
+            # Atomic swap: single PATCH updates tile_stem + image_url together.
+            update("save", 96, "Swapping in new background...")
+            if SUPABASE_URL:
+                tile_base_url = f"{SUPABASE_URL}/storage/v1/object/public/spheres"
+                image_url = f"{tile_base_url}/{new_stem}.jpg"
+            else:
+                tile_base_url = ""
+                image_url = f"/spheres/{new_stem}.jpg"
+
+            duration = int(time.time() - start)
+
+            update_generation_status(gen_id, {
+                "status": "done",
+                "step": "done",
+                "step_label": "Background rerolled",
+                "image_url": image_url,
+                "tile_stem": new_stem,
+                "tile_base_url": tile_base_url,
+                "background_prompt": prompt,
+                "reroll_count": (generations[gen_id].get("reroll_count", 0) + 1),
+                "last_rerolled_at": datetime.now(timezone.utc).isoformat(),
+                "duration_s": duration,
+            })
+
+            generations[gen_id].update({
+                "status": "done",
+                "step": "done",
+                "pct": 100,
+                "label": "Background rerolled",
+                "image_url": image_url,
+                "tile_stem": new_stem,
+                "tile_base_url": tile_base_url,
+            })
+            print(f"Reroll complete: {gen_id} → {new_stem} in {duration}s")
+
+        except Exception as e:
+            print(f"Reroll error: {e}")
+            import traceback
+            traceback.print_exc()
+            generations[gen_id].update({"status": "failed", "error": str(e)})
+            update_generation_status(gen_id, {
+                "status": "failed",
+                "step_label": "Reroll failed",
+                "error": str(e),
+            })
+
+    executor.submit(run_reroll, gen_id, prompt, new_stem)
+    return {"job_id": gen_id, "new_stem": new_stem}
+
+
+@app.post("/reroll-variants")
+async def reroll_variants(body: dict):
+    """Generate N 8K skybox previews for the user to pick from.
+
+    No 16K export, no tile pyramid — those only happen when the user commits
+    a variant via /reroll-variants/{job_id}/commit. Each 8K call is one
+    Blockade Labs skybox_generate charge (~$0.30).
+
+    Body:
+      generation_id: str   — existing gen to reroll
+      prompt: str          — shared prompt across all variants
+      style_id: int?       — defaults to 119 (M3 Photoreal)
+      negative_text: str?  — override default negative
+      count: int?          — 1..4, defaults to 4
+      high_res: bool?      — used when committing (stored for later)
+
+    Returns { "job_id": str } — poll GET /reroll-variants/{job_id}.
+    """
+    gen_id = body.get("generation_id", "").strip()
+    prompt = body.get("prompt", "").strip()
+    if not gen_id or not prompt:
+        return JSONResponse({"error": "generation_id and prompt required"}, status_code=400)
+
+    style_id = body.get("style_id")
+    negative_text = body.get("negative_text")
+    high_res = bool(body.get("high_res", False))
+    count = max(1, min(4, int(body.get("count", 4))))
+    job_id = f"vr-{uuid.uuid4().hex[:8]}"
+
+    variants_cache[job_id] = {
+        "job_id": job_id,
+        "gen_id": gen_id,
+        "prompt": prompt,
+        "style_id": style_id,
+        "negative_text": negative_text,
+        "high_res": high_res,
+        "status": "running",
+        "committed_variant_id": None,
+        "variants": [
+            {"id": f"v{i}", "status": "pending", "obfuscated_id": None, "preview_url": None}
+            for i in range(count)
+        ],
+    }
+
+    def run_variants():
+        from sphere_gen import generate_skybox_8k
+
+        async def one(variant_idx: int):
+            try:
+                result = await generate_skybox_8k(
+                    prompt,
+                    style_id=style_id,
+                    generation_id=gen_id,
+                    feature="variants_preview",
+                    negative_text=negative_text,
+                )
+                variants_cache[job_id]["variants"][variant_idx].update({
+                    "status": "ready",
+                    "obfuscated_id": result["obfuscated_id"],
+                    "preview_url": result["file_url"],
+                })
+            except Exception as exc:
+                variants_cache[job_id]["variants"][variant_idx].update({
+                    "status": "failed",
+                    "error": str(exc),
+                })
+
+        async def run_all():
+            await asyncio.gather(*(one(i) for i in range(count)))
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(run_all())
+        finally:
+            loop.close()
+        # Mark the job done only once every variant has a terminal state.
+        ready = sum(1 for v in variants_cache[job_id]["variants"] if v["status"] == "ready")
+        variants_cache[job_id]["status"] = "done" if ready > 0 else "failed"
+
+    executor.submit(run_variants)
+    return {"job_id": job_id}
+
+
+@app.get("/reroll-variants/{job_id}")
+async def get_reroll_variants(job_id: str):
+    """Return current state of a variant job (for polling)."""
+    job = variants_cache.get(job_id)
+    if not job:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return job
+
+
+@app.post("/reroll-variants/{job_id}/commit")
+async def commit_reroll_variant(job_id: str, body: dict):
+    """User picked a variant — do the 16K export + tile pyramid swap."""
+    variant_id = body.get("variant_id", "")
+    job = variants_cache.get(job_id)
+    if not job:
+        return JSONResponse({"error": "job not found"}, status_code=404)
+    if job.get("committed_variant_id"):
+        return JSONResponse({"error": "already committed"}, status_code=409)
+
+    variant = next((v for v in job["variants"] if v["id"] == variant_id), None)
+    if not variant or variant["status"] != "ready":
+        return JSONResponse({"error": "variant not ready"}, status_code=400)
+
+    gen_id = job["gen_id"]
+    new_stem = f"{gen_id}-rr{int(time.time())}"
+    obfuscated_id = variant["obfuscated_id"]
+    prompt = job["prompt"]
+    style_id = job["style_id"]
+    high_res = job["high_res"]
+
+    job["committed_variant_id"] = variant_id
+    job["commit_status"] = "running"
+
+    generations[gen_id] = generations.get(gen_id, {"id": gen_id})
+    generations[gen_id].update({
+        "status": "running",
+        "step": "upscale",
+        "pct": 55,
+        "label": "Exporting chosen variant at 16K...",
+    })
+
+    def run_commit():
+        from sphere_gen import export_skybox_16k
+        start = time.time()
+
+        def update(step: str, pct: int, label: str):
+            generations[gen_id].update({"step": step, "pct": pct, "label": label})
+            update_generation_status(gen_id, {"step": step, "step_label": label})
+
+        try:
+            def on_export_progress(status):
+                if "complete" not in status:
+                    update("upscale", 60, "Exporting 16K...")
+
+            loop = asyncio.new_event_loop()
+            img_bytes = loop.run_until_complete(
+                export_skybox_16k(
+                    obfuscated_id,
+                    generation_id=gen_id,
+                    feature="bg_reroll",
+                    prompt=prompt,
+                    style_id=style_id,
+                    on_progress=on_export_progress,
+                )
+            )
+            loop.close()
+            update("compose", 68, "Building 16K canvas...")
+
+            img = pyvips.Image.new_from_buffer(img_bytes, "")
+            if img.bands == 4:
+                img = img[:3]
+            if img.width != 16384 or img.height != 8192:
+                canvas = img.resize(
+                    16384 / img.width,
+                    kernel=pyvips.enums.Kernel.LANCZOS3,
+                    vscale=8192 / img.height,
+                )
+            else:
+                canvas = img
+            update("compose", 72, "16K canvas ready")
+
+            def on_tile_progress(done, total):
+                pct = 72 + int(23 * (done / total))
+                update("tiles", pct, f"Generating tiles ({done}/{total})...")
+
+            generate_tiles(canvas, new_stem, on_progress=on_tile_progress, high_res=high_res)
+            update("save", 96, "Swapping in new background...")
+
+            if SUPABASE_URL:
+                tile_base_url = f"{SUPABASE_URL}/storage/v1/object/public/spheres"
+                image_url = f"{tile_base_url}/{new_stem}.jpg"
+            else:
+                tile_base_url = ""
+                image_url = f"/spheres/{new_stem}.jpg"
+
+            duration = int(time.time() - start)
+            update_generation_status(gen_id, {
+                "status": "done",
+                "step": "done",
+                "step_label": "Background rerolled",
+                "image_url": image_url,
+                "tile_stem": new_stem,
+                "tile_base_url": tile_base_url,
+                "background_prompt": prompt,
+                "reroll_count": (generations[gen_id].get("reroll_count", 0) + 1),
+                "last_rerolled_at": datetime.now(timezone.utc).isoformat(),
+                "duration_s": duration,
+            })
+            generations[gen_id].update({
+                "status": "done",
+                "step": "done",
+                "pct": 100,
+                "label": "Background rerolled",
+                "image_url": image_url,
+                "tile_stem": new_stem,
+                "tile_base_url": tile_base_url,
+            })
+            job["commit_status"] = "done"
+            job["new_stem"] = new_stem
+            print(f"Reroll (variant {variant_id}) complete: {gen_id} → {new_stem} in {duration}s")
+
+        except Exception as exc:
+            print(f"Variant commit error: {exc}")
+            import traceback
+            traceback.print_exc()
+            job["commit_status"] = "failed"
+            job["commit_error"] = str(exc)
+            generations[gen_id].update({"status": "failed", "error": str(exc)})
+            update_generation_status(gen_id, {
+                "status": "failed",
+                "step_label": "Reroll commit failed",
+                "error": str(exc),
+            })
+
+    executor.submit(run_commit)
+    return {"ok": True, "job_id": job_id, "new_stem": new_stem}
 
 
 @app.post("/generate-from-uploads")
@@ -1509,7 +1934,12 @@ def run_pipeline_with_images(gen_id: str, raw_images: list[bytes]):
 
         update("upscale", 12, f"Enhancing {len(raw_images)} images (GPU)...")
         upscaled = loop.run_until_complete(
-            upscale_all_parallel(raw_images, on_progress=on_upscale_progress)
+            upscale_all_parallel(
+                raw_images,
+                on_progress=on_upscale_progress,
+                generation_id=gen_id,
+                image_kind="scraped_thumbnail",
+            )
         )
         loop.close()
         update("upscale", 65, f"Enhanced {len(upscaled)} images")

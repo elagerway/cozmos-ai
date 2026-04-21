@@ -16,7 +16,10 @@ import httpx
 import pyvips
 from PIL import Image
 
+from cost_tracker import log_anthropic
+
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+SCENE_ANALYZER_MODEL = "claude-sonnet-4-20250514"
 
 
 def panorama_to_yaw_pitch(x: float, y: float, width: int, height: int) -> dict:
@@ -34,10 +37,15 @@ def estimate_marker_width(obj_width: float, img_width: int) -> int:
     return max(280, min(700, int(fraction * 4200)))
 
 
-async def detect_scene_elements(panorama_bytes: bytes) -> list[dict]:
+async def detect_scene_elements(
+    panorama_bytes: bytes,
+    *,
+    generation_id: str | None = None,
+) -> list[dict]:
     """Use Claude Vision to detect TVs, screens, and picture frames in a panorama.
 
     Returns a list of detected elements with positions and types.
+    Logs token usage to api_costs under feature="scene_analysis".
     """
     if not ANTHROPIC_API_KEY:
         print("  Scene analysis: ANTHROPIC_API_KEY not set, using default positions")
@@ -89,7 +97,7 @@ Respond with ONLY the JSON array, no other text."""
                 "content-type": "application/json",
             },
             json={
-                "model": "claude-sonnet-4-20250514",
+                "model": SCENE_ANALYZER_MODEL,
                 "max_tokens": 1024,
                 "messages": [{
                     "role": "user",
@@ -116,6 +124,16 @@ Respond with ONLY the JSON array, no other text."""
             return []
 
         result = resp.json()
+        usage = result.get("usage", {})
+        log_anthropic(
+            model=SCENE_ANALYZER_MODEL,
+            input_tokens=int(usage.get("input_tokens", 0)),
+            output_tokens=int(usage.get("output_tokens", 0)),
+            generation_id=generation_id,
+            feature="scene_analysis",
+            operation="vision",
+            metadata={"analysis_dims": f"{analysis_w}x{analysis_h}"},
+        )
         content = result.get("content", [{}])[0].get("text", "")
 
         # Parse JSON from response
