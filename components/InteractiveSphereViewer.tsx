@@ -92,90 +92,98 @@ function safeUrl(u: unknown): string {
   return /^(https?:|\/|#)/i.test(raw) ? escapeHtml(raw) : "#"
 }
 
+// ---------- Marker visual language: flat glass panels ----------
+// These are HUD overlays, not faux 3D objects. Billboards facing the camera
+// look natural when the design leans into that — no fake wood-frame shadows,
+// no wall-mounted TV bezels. Just clean info cards with subtle glass, tight
+// typography, and clear affordances.
+//
+// Shared card style used across marker types:
+//   - semi-transparent near-black fill with backdrop blur
+//   - 1px hairline border (low opacity white)
+//   - 14px radius
+//   - minimal shadow (depth without pretending to be in 3D)
+
+const CARD_STYLE = `
+  background: rgba(12, 12, 14, 0.78);
+  backdrop-filter: blur(18px) saturate(1.05);
+  -webkit-backdrop-filter: blur(18px) saturate(1.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  color: white;
+  font-family: Inter, system-ui, sans-serif;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.42);
+`
+
 function ProfileCardHTML(data: ProfileMarkerData, width: number = 320): string {
-  // Wall-mounted display panel — sharp, solid, like a kiosk in the room
   const name = escapeHtml(data.name)
   const handle = escapeHtml(data.handle)
   const bio = escapeHtml((data.bio || "").slice(0, 160))
-  const bioDots = (data.bio || "").length > 160 ? "..." : ""
+  const bioDots = (data.bio || "").length > 160 ? "…" : ""
   const subs = escapeHtml(data.subscriber_count)
   const tw = escapeHtml(data.twitter_handle)
   const ig = escapeHtml((data as any).instagram_handle)
   const tt = escapeHtml((data as any).tiktok_handle)
   return `
-    <div style="
-      background: linear-gradient(180deg, #0d0d0d 0%, #151515 100%);
-      border: 1px solid rgba(255,255,255,0.06);
-      border-left: 4px solid rgba(59,130,246,0.6);
-      border-radius: 4px;
-      padding: 28px 28px 24px;
-      width: ${width}px;
-      color: white;
-      font-family: Inter, system-ui, sans-serif;
-      cursor: default;
-      box-shadow: 0 20px 40px rgba(0,0,0,0.8);
-    ">
-      <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;">
-        ${data.profile_image ? `<img src="${safeUrl(data.profile_image)}" style="width:80px;height:80px;border-radius:8px;border:2px solid rgba(255,255,255,0.1);object-fit:cover;" />` : ""}
-        <div>
-          <div style="font-size:22px;font-weight:800;letter-spacing:-0.02em;">${name}</div>
-          <div style="font-size:13px;color:rgba(255,255,255,0.35);margin-top:3px;">${handle}</div>
+    <div style="${CARD_STYLE} padding:22px 22px 20px; width:${width}px; cursor:default;">
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;">
+        ${data.profile_image ? `<img src="${safeUrl(data.profile_image)}" style="width:64px;height:64px;border-radius:12px;border:1px solid rgba(255,255,255,0.1);object-fit:cover;flex-shrink:0;" />` : ""}
+        <div style="min-width:0;">
+          <div style="font-size:18px;font-weight:700;letter-spacing:-0.015em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${name}</div>
+          ${handle ? `<div style="font-size:12px;color:rgba(255,255,255,0.45);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${handle}</div>` : ""}
         </div>
       </div>
-      ${bio ? `<p style="font-size:13px;color:rgba(255,255,255,0.55);line-height:1.6;margin:0 0 16px 0;">${bio}${bioDots}</p>` : ""}
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;">
-        ${subs ? `<span style="padding:4px 10px;border-radius:3px;background:rgba(255,0,0,0.12);font-size:11px;color:rgba(255,100,100,0.9);">YT ${subs}</span>` : ""}
-        ${ig ? `<span style="padding:4px 10px;border-radius:3px;background:rgba(225,48,108,0.12);font-size:11px;color:rgba(225,130,170,0.9);">IG @${ig}</span>` : ""}
-        ${tw ? `<span style="padding:4px 10px;border-radius:3px;background:rgba(29,155,240,0.12);font-size:11px;color:rgba(100,180,240,0.9);">X @${tw}</span>` : ""}
-        ${tt ? `<span style="padding:4px 10px;border-radius:3px;background:rgba(0,242,234,0.08);font-size:11px;color:rgba(100,242,234,0.9);">TT @${tt}</span>` : ""}
+      ${bio ? `<p style="font-size:13px;color:rgba(255,255,255,0.70);line-height:1.55;margin:0 0 14px 0;">${bio}${bioDots}</p>` : ""}
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:${data.channel_url ? "14" : "0"}px;">
+        ${subs ? `<span style="padding:4px 9px;border-radius:999px;background:rgba(255,60,60,0.14);font-size:11px;color:rgba(255,160,160,0.95);">YT · ${subs}</span>` : ""}
+        ${ig ? `<span style="padding:4px 9px;border-radius:999px;background:rgba(225,48,108,0.14);font-size:11px;color:rgba(244,150,190,0.95);">IG @${ig}</span>` : ""}
+        ${tw ? `<span style="padding:4px 9px;border-radius:999px;background:rgba(29,155,240,0.14);font-size:11px;color:rgba(130,190,245,0.95);">X @${tw}</span>` : ""}
+        ${tt ? `<span style="padding:4px 9px;border-radius:999px;background:rgba(0,242,234,0.10);font-size:11px;color:rgba(130,242,240,0.95);">TT @${tt}</span>` : ""}
       </div>
       ${data.channel_url ? `<a href="${safeUrl(data.channel_url)}" target="_blank" rel="noopener" style="
-        display:inline-block;padding:10px 24px;
-        background:#1a1a1a;border:1px solid rgba(255,255,255,0.1);
-        border-radius:4px;
-        color:white;font-size:13px;font-weight:600;text-decoration:none;
-      ">Visit Channel</a>` : ""}
+        display:inline-flex;align-items:center;gap:6px;
+        padding:9px 16px;
+        background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);
+        border-radius:8px;
+        color:white;font-size:12px;font-weight:600;text-decoration:none;
+        transition:background 0.15s;
+      " onmouseenter="this.style.background='rgba(255,255,255,0.14)'" onmouseleave="this.style.background='rgba(255,255,255,0.08)'">Visit channel →</a>` : ""}
     </div>
   `
 }
 
 function VideoThumbnailHTML(data: VideoMarkerData, width: number = 360): string {
-  // Wall-mounted TV — thick bezel, screen glow, realistic proportions
+  // Flat card. Thumbnail on top, title bar below. Camera-facing but clearly
+  // a UI element — no fake TV bezel trying (and failing) to look 3D.
   const videoId = escapeHtml(data.video_id)
   const title = escapeHtml(data.title)
   const viewCount = escapeHtml(data.view_count)
   return `
     <div data-video-id="${videoId}" data-mode="thumbnail" style="
-      background: #080808;
-      border: 12px solid #111;
-      border-bottom: 18px solid #111;
-      border-radius: 6px;
+      ${CARD_STYLE}
       width: ${width}px;
       overflow: hidden;
-      color: white;
-      font-family: Inter, system-ui, sans-serif;
       cursor: pointer;
-      box-shadow: 0 15px 40px rgba(0,0,0,0.9);
     ">
-      <div style="position:relative;box-shadow:inset 0 0 30px rgba(100,150,255,0.06);">
+      <div style="position:relative;">
         <img src="${safeUrl(data.thumbnail_url)}" style="width:100%;aspect-ratio:16/9;object-fit:cover;display:block;" />
-        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.15);">
-          <div style="width:72px;height:72px;border-radius:50%;background:rgba(255,0,0,0.85);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 25px rgba(255,0,0,0.5);transition:transform 0.2s;"
-               onmouseenter="this.style.transform='scale(1.15)'" onmouseleave="this.style.transform='scale(1)'">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg, rgba(0,0,0,0) 60%, rgba(0,0,0,0.35) 100%);">
+          <div style="width:52px;height:52px;border-radius:50%;background:rgba(255,255,255,0.92);display:flex;align-items:center;justify-content:center;transition:transform 0.18s, background 0.18s;"
+               onmouseenter="this.style.transform='scale(1.08)';this.style.background='rgba(255,255,255,1)'"
+               onmouseleave="this.style.transform='scale(1)';this.style.background='rgba(255,255,255,0.92)'">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="#0a0a0a"><path d="M8 5v14l11-7z"/></svg>
           </div>
         </div>
       </div>
-      <div style="padding:10px 14px;background:#0a0a0a;">
-        <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</div>
-        ${viewCount ? `<div style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:3px;">${viewCount}</div>` : ""}
+      <div style="padding:11px 14px 13px;">
+        <div style="font-size:13px;font-weight:600;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${title}</div>
+        ${viewCount ? `<div style="font-size:11px;color:rgba(255,255,255,0.45);margin-top:4px;">${viewCount}</div>` : ""}
       </div>
     </div>
   `
 }
 
 function VideoPlayingHTML(data: VideoMarkerData, width: number = 360): string {
-  // TV screen with YouTube or Vimeo iframe — same bezel styling, seamless transition
   // Only allow video IDs that match the platform's expected format — defense-in-depth
   // against crafted IDs that could break out of the src attribute.
   const ytId = /^[A-Za-z0-9_-]{11}$/.test(data.video_id || "") ? data.video_id : ""
@@ -187,17 +195,11 @@ function VideoPlayingHTML(data: VideoMarkerData, width: number = 360): string {
   const title = escapeHtml(data.title)
   return `
     <div data-video-id="${videoId}" data-mode="playing" style="
-      background: #000;
-      border: 12px solid #111;
-      border-bottom: 18px solid #111;
-      border-radius: 6px;
+      ${CARD_STYLE}
       width: ${width}px;
       overflow: hidden;
-      color: white;
-      font-family: Inter, system-ui, sans-serif;
-      box-shadow: 0 15px 40px rgba(0,0,0,0.9), 0 0 60px rgba(100,150,255,0.1);
     ">
-      <div style="position:relative;width:100%;padding-bottom:56.25%;">
+      <div style="position:relative;width:100%;padding-bottom:56.25%;background:#000;">
         <iframe
           src="${embedSrc}"
           style="position:absolute;inset:0;width:100%;height:100%;border:0;"
@@ -205,60 +207,54 @@ function VideoPlayingHTML(data: VideoMarkerData, width: number = 360): string {
           allowfullscreen
         ></iframe>
       </div>
-      <div style="padding:8px 14px;background:#0a0a0a;display:flex;justify-content:space-between;align-items:center;">
+      <div style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
         <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;">${title}</div>
         <button onclick="this.closest('[data-video-id]').setAttribute('data-action','close')" style="
-          margin-left:10px;padding:5px 14px;border-radius:3px;border:1px solid rgba(255,255,255,0.1);
-          background:#1a1a1a;color:rgba(255,255,255,0.5);font-size:11px;cursor:pointer;white-space:nowrap;
-        ">Stop</button>
+          padding:5px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.12);
+          background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.75);font-size:11px;
+          cursor:pointer;white-space:nowrap;transition:background 0.15s;
+        " onmouseenter="this.style.background='rgba(255,255,255,0.12)'" onmouseleave="this.style.background='rgba(255,255,255,0.06)'">Close</button>
       </div>
     </div>
   `
 }
 
 function ImageFrameHTML(data: { image_url: string; source: string }, width: number = 160): string {
-  // Wall-mounted picture frame — wooden frame, off-white matte, realistic shadow
+  // Clean rounded image card. No mat, no wood frame — just the image with a
+  // subtle border and shadow, so it reads as a photo overlay not a faux frame.
   return `
     <div style="
-      background: linear-gradient(145deg, #3a2e1f, #2a2015, #3a2e1f);
-      padding: 14px;
-      border-radius: 2px;
-      box-shadow: 0 8px 25px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,255,255,0.06);
+      ${CARD_STYLE}
+      padding: 0;
       width: ${width}px;
+      overflow: hidden;
       cursor: default;
     ">
-      <div style="border:6px solid #f0ebe0;border-radius:1px;overflow:hidden;box-shadow:inset 0 0 10px rgba(0,0,0,0.15);">
-        <img src="${safeUrl(data.image_url)}" style="width:100%;aspect-ratio:4/5;object-fit:cover;display:block;" />
-      </div>
+      <img src="${safeUrl(data.image_url)}" style="width:100%;aspect-ratio:4/5;object-fit:cover;display:block;" />
     </div>
   `
 }
 
 function AudioPlayerHTML(data: AudioMarkerData, width: number = 280): string {
-  // Speaker-style audio card with built-in HTML5 player
+  // Flat audio card. Small play icon instead of a fake speaker cone.
   const title = escapeHtml(data.title || "Audio")
   const artist = data.artist ? escapeHtml(data.artist) : ""
   return `
     <div data-audio-url="${safeUrl(data.url)}" style="
-      background: linear-gradient(160deg, #1a1a1a, #0a0a0a);
-      border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 12px;
-      padding: 18px 18px 14px;
+      ${CARD_STYLE}
+      padding: 16px 16px 13px;
       width: ${width}px;
-      color: white;
-      font-family: Inter, system-ui, sans-serif;
-      box-shadow: 0 15px 40px rgba(0,0,0,0.85), inset 0 1px 0 rgba(255,255,255,0.04);
     ">
-      <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">
-        <div style="width:54px;height:54px;border-radius:50%;background:radial-gradient(circle at 50% 50%, #333 0%, #111 60%, #050505 100%);border:3px solid #0a0a0a;box-shadow:0 2px 6px rgba(0,0,0,0.8),inset 0 0 0 8px #1a1a1a;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-          <div style="width:10px;height:10px;border-radius:50%;background:#ff3b30;"></div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:11px;">
+        <div style="width:42px;height:42px;border-radius:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
         </div>
         <div style="min-width:0;flex:1;">
-          <div style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</div>
-          ${artist ? `<div style="font-size:11px;color:rgba(255,255,255,0.45);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${artist}</div>` : ""}
+          <div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</div>
+          ${artist ? `<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${artist}</div>` : ""}
         </div>
       </div>
-      <audio controls preload="none" src="${safeUrl(data.url)}" style="width:100%;height:32px;filter:invert(0.92) hue-rotate(180deg);"></audio>
+      <audio controls preload="none" src="${safeUrl(data.url)}" style="width:100%;height:30px;filter:invert(0.92) hue-rotate(180deg);"></audio>
     </div>
   `
 }
@@ -268,32 +264,26 @@ function BioLinksHTML(data: BioLinksMarkerData, width: number = 300): string {
   const rows = (data.links || []).map((l) => `
     <a href="${safeUrl(l.url)}" target="_blank" rel="noopener noreferrer" style="
       display:flex;align-items:center;gap:12px;
-      padding:12px 14px;
-      background:rgba(255,255,255,0.04);
+      padding:11px 13px;
+      background:rgba(255,255,255,0.05);
       border:1px solid rgba(255,255,255,0.08);
       border-radius:10px;
       color:white;text-decoration:none;
-      transition:background 0.15s;
-    " onmouseenter="this.style.background='rgba(255,255,255,0.09)'" onmouseleave="this.style.background='rgba(255,255,255,0.04)'">
-      <span style="font-size:20px;flex-shrink:0;">${escapeHtml(l.emoji || "🔗")}</span>
-      <span style="font-size:13px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(l.title || l.url)}</span>
-      <span style="font-size:12px;color:rgba(255,255,255,0.35);">↗</span>
+      transition:background 0.15s, border-color 0.15s;
+    " onmouseenter="this.style.background='rgba(255,255,255,0.1)';this.style.borderColor='rgba(255,255,255,0.15)'" onmouseleave="this.style.background='rgba(255,255,255,0.05)';this.style.borderColor='rgba(255,255,255,0.08)'">
+      <span style="font-size:18px;flex-shrink:0;">${escapeHtml(l.emoji || "🔗")}</span>
+      <span style="font-size:12px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(l.title || l.url)}</span>
+      <span style="font-size:11px;color:rgba(255,255,255,0.4);">↗</span>
     </a>
   `).join("")
   return `
     <div style="
-      background: linear-gradient(180deg, #0d0d0d, #151515);
-      border: 1px solid rgba(255,255,255,0.06);
-      border-left: 4px solid rgba(168,85,247,0.6);
-      border-radius: 4px;
-      padding: 20px 20px 18px;
+      ${CARD_STYLE}
+      padding: 18px 18px 16px;
       width: ${width}px;
-      color: white;
-      font-family: Inter, system-ui, sans-serif;
-      box-shadow: 0 20px 40px rgba(0,0,0,0.8);
     ">
-      <div style="font-size:15px;font-weight:700;margin-bottom:14px;letter-spacing:-0.01em;">${title}</div>
-      <div style="display:flex;flex-direction:column;gap:8px;">${rows}</div>
+      <div style="font-size:13px;font-weight:700;margin-bottom:12px;letter-spacing:-0.005em;color:rgba(255,255,255,0.9);">${title}</div>
+      <div style="display:flex;flex-direction:column;gap:7px;">${rows}</div>
     </div>
   `
 }
