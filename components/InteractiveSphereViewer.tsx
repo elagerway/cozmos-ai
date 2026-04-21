@@ -326,10 +326,13 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
   const [rerollOpen, setRerollOpen] = useState(false)
   const [copilotOpen, setCopilotOpen] = useState(false)
   // Comfort settings — anti-distortion rig (EP '953 / CN '718 / US '579).
-  // Persisted per-user in localStorage; defaults favor comfort.
+  // Defaults ON; persisted per-user in localStorage so explicit opt-outs stick.
+  // Only "0" turns it off — null/missing means first visit → use default.
   const [motionReduced, setMotionReduced] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false
-    return window.localStorage.getItem("biosphere_motion_reduced") === "1"
+    if (typeof window === "undefined") return true
+    const stored = window.localStorage.getItem("biosphere_motion_reduced")
+    if (stored === null) return true
+    return stored === "1"
   })
   const [comfortOpen, setComfortOpen] = useState(false)
   const [excludeOpen, setExcludeOpen] = useState(false)
