@@ -474,6 +474,23 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
           transition: none !important;
         }
 
+        /* Wall-aligned perspective — markers sit tangent to the sphere
+           surface instead of billboarding flat to the camera. A JS updater
+           sets --cz-yaw-tilt / --cz-pitch-tilt on each .psv-marker every time
+           the camera moves; at angular offset theta from view center the
+           marker tilts by exactly theta around the corresponding axis,
+           which is physically what a planar wall tangent to the sphere
+           would look like. */
+        .psv-marker > *:first-child {
+          transform: perspective(1400px)
+                     rotateY(var(--cz-yaw-tilt, 0deg))
+                     rotateX(var(--cz-pitch-tilt, 0deg));
+          transform-style: preserve-3d;
+          transform-origin: center center;
+          will-change: transform;
+          backface-visibility: hidden;
+        }
+
         /* Edit mode: dashed border on all markers */
         .biosphere-edit-mode .psv-marker {
           outline: 2px dashed rgba(59,130,246,0.5) !important;
@@ -704,6 +721,49 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
 
         const markersPlugin = viewer.getPlugin(MarkersPlugin) as any
         if (!markersPlugin) return
+
+        // Wall-aligned perspective: on every camera move, set per-marker CSS
+        // variables that tilt each marker toward its wall normal. At angular
+        // offset θ from view center, the marker rotates by θ — which is
+        // exactly how a tangent plane on a sphere foreshortens from an
+        // interior viewpoint.
+        const DEG = 180 / Math.PI
+        const normalizeYaw = (degrees: number): number => {
+          let d = degrees
+          while (d > 180) d -= 360
+          while (d <= -180) d += 360
+          return d
+        }
+        const updateMarkerTilts = () => {
+          const pos = viewer.getPosition()
+          const camYawDeg = pos.yaw * DEG
+          const camPitchDeg = pos.pitch * DEG
+          const allMarkers = markersPlugin.getMarkers?.() ?? []
+          for (const m of allMarkers) {
+            const mYawRad = m?.config?.position?.yaw
+            const mPitchRad = m?.config?.position?.pitch
+            if (typeof mYawRad !== "number" || typeof mPitchRad !== "number") continue
+            const dYaw = normalizeYaw(mYawRad * DEG - camYawDeg)
+            const dPitch = mPitchRad * DEG - camPitchDeg
+            // Clamp so extreme angles don't produce visual nonsense — at 70°+
+            // the tangent-plane approximation starts to look edge-on.
+            const tiltY = Math.max(-70, Math.min(70, dYaw))
+            const tiltX = Math.max(-60, Math.min(60, -dPitch))
+            const el = document.getElementById(`psv-marker-${m.id}`)
+            if (el) {
+              el.style.setProperty("--cz-yaw-tilt", `${tiltY.toFixed(2)}deg`)
+              el.style.setProperty("--cz-pitch-tilt", `${tiltX.toFixed(2)}deg`)
+            }
+          }
+        }
+        viewer.addEventListener("position-updated", updateMarkerTilts)
+        viewer.addEventListener("zoom-updated", updateMarkerTilts)
+        // Initial pass after markers paint.
+        requestAnimationFrame(() => requestAnimationFrame(updateMarkerTilts))
+        ;(viewer as any).__biospherePerspectiveCleanup = () => {
+          viewer.removeEventListener("position-updated", updateMarkerTilts)
+          viewer.removeEventListener("zoom-updated", updateMarkerTilts)
+        }
 
         const playingVideos = new Set<string>()
 
@@ -1002,6 +1062,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
       ;(viewerRef.current as any)?.__biosphereEditCleanup?.()
       ;(viewerRef.current as any)?.__biosphereObserver?.disconnect()
       ;(viewerRef.current as any)?.__biosphereRigCleanup?.()
+      ;(viewerRef.current as any)?.__biospherePerspectiveCleanup?.()
       viewerRef.current?.destroy()
       viewerRef.current = null
       setPsvHost(null)
