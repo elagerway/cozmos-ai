@@ -78,7 +78,7 @@ Scene analysis (Claude Vision → detect TVs/screens → marker positions)
   ↓
 Composite thumbnails onto environment (small frames in equatorial band)
   ↓
-Tile pyramid (2K→4K→8K→16K, 170 tiles)
+Tile pyramid (2K→4K→8K, 42 tiles default; +16K tier if `high_res=true`, 170 tiles). Frontend `LEVELS` in the viewers must match pipeline output.
   ↓
 Upload to Supabase Storage + save generation record
   ↓

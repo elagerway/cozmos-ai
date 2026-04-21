@@ -65,11 +65,15 @@ interface Props {
   sphereId?: string | null
 }
 
+// Tile pyramid — must match what the pipeline actually generated.
+// With `high_res=false` (default, the Ultra HD checkbox off) the pipeline
+// skips the 16K tier; requesting those non-existent tiles from PSV shows
+// red warning triangles on zoom. Keep this in sync with pipeline/server.py
+// generate_tiles() — currently LEVELS[:3] for non-high_res.
 const LEVELS = [
   { width: 2048, cols: 2, rows: 1 },
   { width: 4096, cols: 4, rows: 2 },
   { width: 8192, cols: 8, rows: 4 },
-  { width: 16384, cols: 16, rows: 8 },
 ]
 
 // Escape helpers — marker HTML goes straight into PSV's innerHTML, so every

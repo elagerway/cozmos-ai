@@ -14,11 +14,11 @@ function getImageStem(url: string): string | null {
   return match ? match[1] : null
 }
 
+// Match pipeline's default (high_res=false): 3-level pyramid, no 16K tier.
 const LEVELS = [
   { width: 2048, cols: 2, rows: 1 },
   { width: 4096, cols: 4, rows: 2 },
   { width: 8192, cols: 8, rows: 4 },
-  { width: 16384, cols: 16, rows: 8 },
 ]
 
 export function SphereViewer({ imageUrl, tileStem, tileBaseUrl }: Props) {

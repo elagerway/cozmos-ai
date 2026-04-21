@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-04-21
+
+### Fix: sphere tile 404s (red warning triangles on zoom)
+- Frontend `LEVELS` array in `InteractiveSphereViewer.tsx` and `SphereViewer.tsx` included a 16K tier (`width: 16384, cols: 16, rows: 8`) that the pipeline no longer generates by default
+- With `high_res=false` (Ultra HD checkbox off, the default), `pipeline/server.py generate_tiles()` produces 3 tiers — 2K, 4K, 8K — so PSV requests for the 4th tier 404'd and painted red warning triangles
+- Removed the 16K tier from both viewers; frontend pyramid now matches pipeline output. Users who opt into high_res still get all 4 tiers (pipeline decides; frontend just walks what exists)
+
 ## 2026-04-16 (late session)
 
 ### Sphere editor — drag-to-move, drag-to-resize, inline asset add
