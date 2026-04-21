@@ -44,6 +44,17 @@
 - Session history persisted in sessionStorage per sphere
 - Every turn cost-logged under `feature=copilot`, session_id attached for per-conversation breakdown
 
+### Anti-distortion camera rig — patents EP '953 / CN '718 / US '579
+- New `lib/viewer-camera.ts:attachAntiDistortionRig()` attaches six independent anti-sickness behaviors to any PSV instance
+  1. Pitch-adaptive damping: intercepts `before-rotate`, dampens yaw/pitch deltas above 55° where equirectangular stretch exaggerates small movements
+  2. FOV-coupled vignette: soft DOM radial-gradient overlay that fades in above 95° FOV, killing peripheral motion cues
+  3. Horizon-nudge spring: rAF loop applying gentle restoring force toward pitch=0 when idle >400ms at pitch >65°
+  4. Explicit FOV ceiling/floor: 30°–95° (tighter than PSV's 15°–180° default) — never enters fisheye-stretch regime
+  5. Motion-reduced mode: caps `moveSpeed`/`zoomSpeed`, disables `moveInertia`; auto-enables on `prefers-reduced-motion`
+  6. Barrel-correction shader pass: Three.js `EffectComposer` + custom `ShaderPass` applying inverse radial distortion with FOV-scaled `k`/`k2`; bypassed below 70° FOV to keep markers aligned
+- Top-right **👁 Comfort** button + popover with motion-reduced toggle; preference persisted in `biosphere_motion_reduced` localStorage
+- Wired into `InteractiveSphereViewer` at PSV `ready`; cleanup runs on viewer teardown
+
 ### Fix: sphere tile 404s (red warning triangles on zoom)
 - Frontend `LEVELS` array in `InteractiveSphereViewer.tsx` and `SphereViewer.tsx` included a 16K tier that the pipeline no longer generates by default
 - With `high_res=false` (Ultra HD checkbox off, the default), `pipeline/server.py generate_tiles()` produces 3 tiers — 2K, 4K, 8K — so PSV requests for the 4th tier 404'd and painted red warning triangles

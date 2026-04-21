@@ -8,6 +8,7 @@ import { AddMarkerModal } from "./AddMarkerModal"
 import { RerollBackgroundModal } from "./RerollBackgroundModal"
 import { CopilotPanel, type CopilotActions } from "./CopilotPanel"
 import { startBackgroundReroll, startVariantReroll } from "@/lib/pipeline-client"
+import { attachAntiDistortionRig } from "@/lib/viewer-camera"
 import { useEventTracker } from "@/lib/event-tracker"
 
 interface VideoMarkerData {
@@ -323,6 +324,13 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
   const [addOpen, setAddOpen] = useState(false)
   const [rerollOpen, setRerollOpen] = useState(false)
   const [copilotOpen, setCopilotOpen] = useState(false)
+  // Comfort settings — anti-distortion rig (EP '953 / CN '718 / US '579).
+  // Persisted per-user in localStorage; defaults favor comfort.
+  const [motionReduced, setMotionReduced] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false
+    return window.localStorage.getItem("biosphere_motion_reduced") === "1"
+  })
+  const [comfortOpen, setComfortOpen] = useState(false)
   // Heatmap + top-viewed overlays (patent GB '335 / US '706).
   const [heatmapOn, setHeatmapOn] = useState(false)
   const [eventStats, setEventStats] = useState<Record<string, { selects: number; dwell_ms: number; dwell_rank: number; select_rank: number }>>({})
@@ -684,6 +692,11 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
         if (destroyed) return
         setLoading(false)
 
+        // Attach the anti-distortion camera rig as soon as the viewer is live.
+        // Store cleanup on the viewer so the top-level effect teardown runs it.
+        const detachRig = attachAntiDistortionRig(viewer, { motionReduced })
+        ;(viewer as any).__biosphereRigCleanup = detachRig
+
         const markersPlugin = viewer.getPlugin(MarkersPlugin) as any
         if (!markersPlugin) return
 
@@ -983,6 +996,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
       ;(viewerRef.current as any)?.__biosphereCleanup?.()
       ;(viewerRef.current as any)?.__biosphereEditCleanup?.()
       ;(viewerRef.current as any)?.__biosphereObserver?.disconnect()
+      ;(viewerRef.current as any)?.__biosphereRigCleanup?.()
       viewerRef.current?.destroy()
       viewerRef.current = null
       setPsvHost(null)
@@ -1304,8 +1318,68 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
       {/* 360 toggle — lock/unlock vertical look */}
       {!loading && psvHost && createPortal(
         <div
-          style={{ position: "absolute", top: 12, right: 12, zIndex: 90 }}
+          style={{ position: "absolute", top: 12, right: 12, zIndex: 90, display: "flex", alignItems: "flex-start", gap: 8 }}
         >
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => setComfortOpen((v) => !v)}
+              title="Comfort settings — anti-distortion + motion-reduced mode"
+              style={{
+                padding: "6px 12px", fontSize: 12, borderRadius: 8,
+                backdropFilter: "blur(8px)", cursor: "pointer", transition: "all 0.2s",
+                border: motionReduced ? "1px solid rgba(34,197,94,0.5)" : "1px solid rgba(255,255,255,0.1)",
+                background: motionReduced ? "rgba(34,197,94,0.8)" : "rgba(0,0,0,0.4)",
+                color: motionReduced ? "white" : "rgba(255,255,255,0.5)",
+              }}
+            >
+              👁 Comfort{motionReduced ? " · Reduced" : ""}
+            </button>
+            {comfortOpen && (
+              <div
+                onMouseDown={(e) => e.stopPropagation()}
+                onWheel={(e) => e.stopPropagation()}
+                style={{
+                  position: "absolute", top: "calc(100% + 6px)", right: 0, width: 280,
+                  padding: 12, borderRadius: 12,
+                  background: "rgba(10,10,10,0.95)", backdropFilter: "blur(12px)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  color: "white", fontSize: 12, lineHeight: 1.5,
+                  boxShadow: "0 12px 30px rgba(0,0,0,0.6)",
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>Comfort</div>
+                <div style={{ color: "rgba(255,255,255,0.5)", marginBottom: 10, fontSize: 11 }}>
+                  Reduces perspective distortion + motion sickness. Pitch damping, horizon nudge, FOV bounds, and barrel correction are always on.
+                </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={motionReduced}
+                    onChange={(e) => {
+                      const next = e.target.checked
+                      setMotionReduced(next)
+                      try {
+                        window.localStorage.setItem("biosphere_motion_reduced", next ? "1" : "0")
+                      } catch { /* ignore */ }
+                      // Rig reads this at attach time; reload is cleanest way to re-attach.
+                      // Alt: we could re-run attach; for now just remount by forcing a reload-ish flag.
+                      if (viewerRef.current) {
+                        try {
+                          (viewerRef.current as any).__biosphereRigCleanup?.()
+                          const rig = attachAntiDistortionRig(viewerRef.current, { motionReduced: next })
+                          ;(viewerRef.current as any).__biosphereRigCleanup = rig
+                        } catch {}
+                      }
+                    }}
+                  />
+                  <span>Motion-reduced mode (caps velocity, disables momentum)</span>
+                </label>
+                <div style={{ marginTop: 10, fontSize: 10, color: "rgba(255,255,255,0.35)" }}>
+                  Honors your OS &ldquo;Reduce motion&rdquo; preference automatically.
+                </div>
+              </div>
+            )}
+          </div>
           <button
             onClick={() => {
               const next = !lock360
