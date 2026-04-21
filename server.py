@@ -1642,6 +1642,69 @@ async def reroll_background(body: dict):
     return {"job_id": gen_id, "new_stem": new_stem}
 
 
+@app.post("/repack-markers")
+async def repack_markers(body: dict):
+    """Category exclusion + harmony repack (patent US '666).
+
+    Takes a set of markers, removes ones matching the excluded categories,
+    then re-runs the harmony packer on what's left so the remaining markers
+    spread into the freed space with anchor-pull + collision resolution.
+
+    Body:
+      markers: list of { id, type, yaw, pitch, scene_width?, platform?, tags? }
+      excluded_types: list[str] — e.g. ["audio", "bio-links"]
+      excluded_platforms: list[str] — e.g. ["vimeo"] (applies to type=video)
+      excluded_tags: list[str] — e.g. ["sponsored"] (matches against marker.tags)
+      strictness: float 0..1, defaults 0.55
+
+    Returns:
+      { kept: [{ id, yaw, pitch }...], removed_ids: [...] }
+    """
+    markers_in = body.get("markers") or []
+    excluded_types = set(body.get("excluded_types") or [])
+    excluded_platforms = set(body.get("excluded_platforms") or [])
+    excluded_tags = set(body.get("excluded_tags") or [])
+    strictness = float(body.get("strictness", 0.55))
+
+    if not isinstance(markers_in, list):
+        return JSONResponse({"error": "markers must be an array"}, status_code=400)
+
+    # Split into kept vs removed based on the exclusion rules.
+    kept: list[dict] = []
+    removed_ids: list[str] = []
+    for m in markers_in:
+        mtype = str(m.get("type", ""))
+        mplatform = str(m.get("platform", ""))
+        mtags = m.get("tags") or []
+        if mtype in excluded_types:
+            removed_ids.append(str(m.get("id", "")))
+            continue
+        if mtype == "video" and mplatform in excluded_platforms:
+            removed_ids.append(str(m.get("id", "")))
+            continue
+        if isinstance(mtags, list) and any(t in excluded_tags for t in mtags):
+            removed_ids.append(str(m.get("id", "")))
+            continue
+        kept.append({
+            "id": str(m.get("id", "")),
+            "type": mtype,
+            "yaw": float(m.get("yaw", 0)),
+            "pitch": float(m.get("pitch", 0)),
+            "scene_width": float(m.get("scene_width", 300)),
+        })
+
+    # Re-pack the kept set. `_pack_harmonically` mutates in place.
+    if kept:
+        from scene_analyzer import _pack_harmonically
+        _pack_harmonically(kept, strictness=strictness)
+
+    return {
+        "kept": [{"id": m["id"], "yaw": m["yaw"], "pitch": m["pitch"]} for m in kept],
+        "removed_ids": removed_ids,
+        "strictness": strictness,
+    }
+
+
 @app.post("/reroll-variants")
 async def reroll_variants(body: dict):
     """Generate N 8K skybox previews for the user to pick from.

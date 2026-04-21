@@ -44,6 +44,12 @@
 - Session history persisted in sessionStorage per sphere
 - Every turn cost-logged under `feature=copilot`, session_id attached for per-conversation breakdown
 
+### Category exclusion + repack (patent US '666)
+- New `POST /repack-markers` pipeline endpoint — accepts markers + `excluded_types` / `excluded_platforms` / `excluded_tags` / `strictness`, filters, re-runs `_pack_harmonically` on the kept subset so remaining markers spread into the freed space
+- `CategoryExcludeModal.tsx` — checkbox UI with live counts per category + strictness slider
+- "🚫 Categories" button in edit toolbar
+- Copilot tool `exclude_categories` so the user can say things like "hide all my audio markers" or "drop the vimeo videos" conversationally
+
 ### Anti-distortion camera rig — patents EP '953 / CN '718 / US '579
 - New `lib/viewer-camera.ts:attachAntiDistortionRig()` attaches six independent anti-sickness behaviors to any PSV instance
   1. Pitch-adaptive damping: intercepts `before-rotate`, dampens yaw/pitch deltas above 55° where equirectangular stretch exaggerates small movements
