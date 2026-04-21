@@ -422,24 +422,38 @@ async def scrape_instagram_profile(handle: str) -> InstagramData | None:
         # are on Instagram's blacklist, so prod must use a home/residential egress.
         if IG_PROXY_URL:
             cl.set_proxy(IG_PROXY_URL)
-        # Use cached session if available
+
+        # Use cached session if available; fall back to full login.
+        # Verbose logging so we can tell login failures apart from lookup failures.
         session_path = "/tmp/ig_session.json"
         try:
             cl.load_settings(session_path)
             cl.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-            cl.get_timeline_feed()  # Verify session is valid
-        except Exception:
-            cl.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-            cl.dump_settings(session_path)
+            cl.get_timeline_feed()
+            print(f"  Instagram login OK (cached session, user_id={cl.user_id})")
+        except Exception as e:
+            print(f"  Instagram cached session rejected ({type(e).__name__}: {e}); trying fresh login")
+            try:
+                cl.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+                cl.dump_settings(session_path)
+                print(f"  Instagram fresh login OK (user_id={cl.user_id})")
+            except Exception as e2:
+                print(f"  Instagram fresh login FAILED ({type(e2).__name__}: {e2})")
+                return None
 
         # Look up user
         try:
             user_id = cl.user_id_from_username(handle)
-        except Exception:
-            print(f"  Instagram: user '{handle}' not found")
+            print(f"  Instagram resolved @{handle} → user_id={user_id}")
+        except Exception as e:
+            print(f"  Instagram user_id_from_username('{handle}') failed: {type(e).__name__}: {e}")
             return None
 
-        user_info = cl.user_info(user_id)
+        try:
+            user_info = cl.user_info(user_id)
+        except Exception as e:
+            print(f"  Instagram user_info({user_id}) failed: {type(e).__name__}: {e}")
+            return None
 
         data = InstagramData(
             handle=handle,
