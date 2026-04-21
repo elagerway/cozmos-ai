@@ -1616,6 +1616,153 @@ async def health():
     return {"status": "ok", "fal_key_set": bool(FAL_KEY)}
 
 
+@app.post("/regenerate-markers-from-analytics")
+async def regenerate_markers_from_analytics(body: dict):
+    """
+    Patent GB '934 / WO '623: automatic generation of spheres using data-platform
+    data. Reads sphere_events for the given sphere, ranks markers by total dwell,
+    and rewrites the generation's environment JSON so the top-engaged markers:
+
+      - get a bigger scene_scale (patent US '455/565/580: scale by characteristic)
+      - move toward the viewer's "home" yaw (0°) — prime position
+
+    No Blockade regeneration, no new tile pyramid — we only re-rank the existing
+    markers. Cheap and practices the claim.
+
+    Request:  { "sphere_id": "gen-biosphere-xxx", "days": 30 (optional) }
+    Response: { "updated": true, "markers_touched": N, "top_ranked": [...] }
+    """
+    import json as json_mod
+
+    sphere_id = (body.get("sphere_id") or "").strip()
+    days = int(body.get("days", 30))
+    if not sphere_id:
+        return JSONResponse({"error": "sphere_id required"}, status_code=400)
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return JSONResponse({"error": "Supabase not configured"}, status_code=503)
+
+    # 1. Read the current generation row
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            f"{SUPABASE_URL}/rest/v1/generations",
+            params={"id": f"eq.{sphere_id}", "select": "environment,brand,status"},
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+            },
+        )
+    if resp.status_code != 200 or not resp.json():
+        return JSONResponse({"error": "sphere not found"}, status_code=404)
+    row = resp.json()[0]
+    if row.get("status") != "done":
+        return JSONResponse({"error": "sphere not ready"}, status_code=409)
+
+    env_raw = row.get("environment") or "{}"
+    try:
+        env = json_mod.loads(env_raw)
+    except Exception:
+        env = {}
+    markers = list(env.get("markers") or [])
+    if not markers:
+        return JSONResponse({"error": "no markers to re-rank"}, status_code=400)
+
+    # 2. Read engagement events for the sphere (last N days)
+    since_iso = (
+        __import__("datetime").datetime.utcnow()
+        - __import__("datetime").timedelta(days=days)
+    ).isoformat() + "Z"
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        ev_resp = await client.get(
+            f"{SUPABASE_URL}/rest/v1/sphere_events",
+            params={
+                "sphere_id": f"eq.{sphere_id}",
+                "event_type": "eq.marker_dwell",
+                "created_at": f"gte.{since_iso}",
+                "select": "marker_id,meta",
+            },
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+            },
+        )
+    dwell_totals: dict[str, int] = {}
+    for ev in ev_resp.json() if ev_resp.status_code == 200 else []:
+        mid = ev.get("marker_id")
+        meta = ev.get("meta") or {}
+        d = meta.get("duration_ms") if isinstance(meta, dict) else None
+        if mid and isinstance(d, (int, float)) and d > 0:
+            dwell_totals[mid] = dwell_totals.get(mid, 0) + int(d)
+
+    if not dwell_totals:
+        return JSONResponse(
+            {"error": "no engagement data for this sphere in window", "days": days},
+            status_code=400,
+        )
+
+    # 3. Rank markers by dwell. Same IDs as in InteractiveSphereViewer.markerIdFor.
+    def marker_id(m: dict, i: int) -> str:
+        t = m.get("type")
+        data = m.get("data") or {}
+        if t == "profile":
+            return "profile-card"
+        if t == "video":
+            return f"video-{data.get('video_id', '')}"
+        if t == "audio":
+            url_slice = (data.get("url") or "")[:24]
+            from urllib.parse import quote
+            return f"audio-{i}-{quote(url_slice, safe='')}"
+        if t == "bio-links":
+            return f"bio-links-{i}"
+        return f"image-{i}"
+
+    ranked = sorted(
+        enumerate(markers),
+        key=lambda pair: dwell_totals.get(marker_id(pair[1], pair[0]), 0),
+        reverse=True,
+    )
+    # 4. Promote the top 3 most-engaged markers: bump scene_scale + nudge toward yaw 0.
+    top_ranked_ids: list[str] = []
+    touched = 0
+    for rank, (i, m) in enumerate(ranked[:3]):
+        mid = marker_id(m, i)
+        if dwell_totals.get(mid, 0) <= 0:
+            continue
+        top_ranked_ids.append(mid)
+        # scale bump based on rank (rank 0 = most engaged → 1.35x)
+        m["scene_scale"] = round(1.35 - rank * 0.1, 2)
+        # yaw nudge: pull ±30% of the way toward 0 each regen
+        cur_yaw = float(m.get("yaw", 0))
+        m["yaw"] = round(cur_yaw * 0.7, 2)
+        markers[i] = m
+        touched += 1
+
+    # 5. Write back
+    env["markers"] = markers
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        up_resp = await client.patch(
+            f"{SUPABASE_URL}/rest/v1/generations?id=eq.{sphere_id}",
+            json={"environment": json_mod.dumps(env)},
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            },
+        )
+    if up_resp.status_code >= 300:
+        return JSONResponse(
+            {"error": f"failed to update: {up_resp.status_code} {up_resp.text}"},
+            status_code=500,
+        )
+
+    return {
+        "updated": True,
+        "markers_touched": touched,
+        "top_ranked": top_ranked_ids,
+        "dwell_totals": {k: v for k, v in dwell_totals.items() if k in top_ranked_ids},
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8100))

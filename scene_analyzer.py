@@ -156,6 +156,110 @@ Respond with ONLY the JSON array, no other text."""
     return results
 
 
+def _marker_box(marker: dict) -> tuple[float, float]:
+    """Rough visual footprint of a marker in degrees (yaw_span, pitch_span).
+
+    Implements patent US '455 ("bounding polygon") — each marker is treated as
+    an axis-aligned rectangle on the equirectangular sphere, sized by its
+    scene_width and intrinsic aspect ratio per type.
+    """
+    w = marker.get("scene_width", 300)
+    t = marker.get("type", "image")
+    ydeg = w / 20.0
+    if t == "video":
+        pdeg = ydeg * (9 / 16)
+    elif t == "image":
+        pdeg = ydeg * (5 / 4)
+    elif t == "profile":
+        pdeg = ydeg * 0.9
+    elif t == "bio-links":
+        pdeg = ydeg * 1.1
+    elif t == "audio":
+        pdeg = ydeg * 0.4
+    else:
+        pdeg = ydeg
+    return ydeg, pdeg
+
+
+def _yaw_delta(a: float, b: float) -> float:
+    """Signed shortest yaw distance a−b wrapped to (−180, 180]."""
+    d = a - b
+    if d > 180:
+        d -= 360
+    elif d <= -180:
+        d += 360
+    return d
+
+
+def _collides(a: dict, b: dict, pad: float = 2.0) -> bool:
+    """True if two markers' bounding polygons overlap (with padding)."""
+    aw, ah = _marker_box(a)
+    bw, bh = _marker_box(b)
+    return (
+        abs(_yaw_delta(a["yaw"], b["yaw"])) < (aw + bw) / 2 + pad
+        and abs(a["pitch"] - b["pitch"]) < (ah + bh) / 2 + pad
+    )
+
+
+def _pack_harmonically(markers: list[dict], strictness: float = 0.55, max_iter: int = 40) -> None:
+    """In-place harmony packing of marker positions.
+
+    Patents practiced:
+      - GB '147 / EP '254: anchor-point offsets — each marker is pulled
+        toward its original designed (anchor) position so the layout stays
+        close to the intent of the scene analyzer / default grid.
+      - US '349 / CN '866: harmony packing — iteratively adjust positions
+        based on visual characteristics (bounding polygon overlap).
+      - US '580: outward-from-equator packing — we clamp pitch to a band
+        around the equator so the layout reads as a wall-mounted gallery.
+      - US '666: strictness parameter (0..1). Higher values keep markers
+        closer to their anchors; lower values let them spread further
+        to resolve collisions.
+    """
+    import math
+
+    anchors = [(m["yaw"], m["pitch"]) for m in markers]
+    pull = (1 - strictness) * 0.10  # anchor spring strength per iter
+
+    for _ in range(max_iter):
+        moved = False
+        for i, m in enumerate(markers):
+            anchor_yaw, anchor_pitch = anchors[i]
+            dyaw_total = 0.0
+            dpitch_total = 0.0
+
+            # Collision repulsion
+            for j, other in enumerate(markers):
+                if i == j:
+                    continue
+                if not _collides(m, other):
+                    continue
+                dyaw = _yaw_delta(m["yaw"], other["yaw"])
+                dpitch = m["pitch"] - other["pitch"]
+                mag = math.hypot(dyaw, dpitch) or 1.0
+                dyaw_total += (dyaw / mag) * 5.0
+                dpitch_total += (dpitch / mag) * 5.0
+
+            # Anchor pull (harmony) — toward original designed position
+            dyaw_total += _yaw_delta(anchor_yaw, m["yaw"]) * pull
+            dpitch_total += (anchor_pitch - m["pitch"]) * pull
+
+            if abs(dyaw_total) > 0.1 or abs(dpitch_total) > 0.1:
+                new_yaw = m["yaw"] + dyaw_total
+                while new_yaw > 180:
+                    new_yaw -= 360
+                while new_yaw <= -180:
+                    new_yaw += 360
+                # Clamp pitch to equatorial band (US '580)
+                new_pitch = max(-40.0, min(40.0, m["pitch"] + dpitch_total))
+                m["yaw"] = round(new_yaw, 1)
+                m["pitch"] = round(new_pitch, 1)
+                moved = True
+
+        if not moved:
+            break
+
+
 def assign_content_to_positions(
     positions: list[dict],
     videos: list[dict],
@@ -165,6 +269,8 @@ def assign_content_to_positions(
     """Assign content (videos, images, profile) to detected scene positions.
 
     TVs get videos, frames get images, the largest/most central display gets the profile card.
+    Final positions are run through `_pack_harmonically` so bounding polygons don't
+    overlap and markers stay close to their designed anchors.
     """
     markers = []
 
@@ -217,16 +323,11 @@ def assign_content_to_positions(
     for i, video in enumerate(remaining_videos[:6]):
         if i >= len(default_yaws):
             break
-        # Check the yaw isn't too close to an existing marker
-        yaw = default_yaws[i]
-        too_close = any(abs(m["yaw"] - yaw) < 30 for m in markers)
-        if not too_close:
-            markers.append({
-                "type": "video",
-                "yaw": yaw,
-                "pitch": 6,
-                "data": video,
-            })
+        candidate = {"type": "video", "yaw": default_yaws[i], "pitch": 6,
+                     "scene_width": 360, "data": video}
+        # Use real bounding-polygon collision (patents US '455 / '580 / '666)
+        if not any(_collides(candidate, m) for m in markers):
+            markers.append(candidate)
 
     # Place remaining images at default positions if not enough frames detected
     assigned_image_count = min(len(frames), len(images))
@@ -240,15 +341,11 @@ def assign_content_to_positions(
         if i >= len(default_img_positions):
             break
         pos = default_img_positions[i]
-        too_close = any(abs(m["yaw"] - pos["yaw"]) < 20 for m in markers)
-        if not too_close:
-            markers.append({
-                "type": "image",
-                "yaw": pos["yaw"],
-                "pitch": pos["pitch"],
-                "scene_width": 200,
-                "data": {"image_url": img_url, "source": "youtube"},
-            })
+        candidate = {"type": "image", "yaw": pos["yaw"], "pitch": pos["pitch"],
+                     "scene_width": 200,
+                     "data": {"image_url": img_url, "source": "youtube"}}
+        if not any(_collides(candidate, m) for m in markers):
+            markers.append(candidate)
 
     # If no profile card was placed (no TVs found), add at center
     if not any(m["type"] == "profile" for m in markers):
@@ -258,6 +355,11 @@ def assign_content_to_positions(
             "pitch": 10,
             "data": profile_data,
         })
+
+    # Harmony pack — iteratively resolve residual collisions while pulling
+    # each marker back toward its designed (anchor) position.
+    # Patents: GB '147 / EP '254 (anchor) + US '349 / CN '866 (harmony) + US '666 (strictness)
+    _pack_harmonically(markers, strictness=0.55)
 
     return markers
 
