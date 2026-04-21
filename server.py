@@ -1642,6 +1642,149 @@ async def reroll_background(body: dict):
     return {"job_id": gen_id, "new_stem": new_stem}
 
 
+@app.post("/upload-as-markers")
+async def upload_as_markers(body: dict):
+    """Composite upload, done the right way.
+
+    Takes base64-encoded user images, upscales each via fal.ai ESRGAN, uploads
+    the upscaled copies to Supabase storage at `uploads/{gen_id}/`, and
+    returns a set of `image` markers harmony-packed against the existing
+    marker set. The caller persists the combined marker list via
+    onMarkersChanged — no new generation is created, the sphere's `gen_id`
+    stays the same so analytics / copilot / category exclusion all keep
+    working against the same row.
+
+    Body:
+      generation_id: str        — existing sphere id (markers get attached here)
+      images: list[str]         — data URIs or raw base64 of user uploads
+      current_markers: list[{id, type, yaw, pitch, scene_width?}]
+      view_yaw: float?          — centre the new markers around this yaw (defaults 0)
+      view_pitch: float?        — defaults 0
+      strictness: float?        — 0..1, anchor-pull strength during repack
+
+    Returns:
+      {
+        new_markers: [{id, type, yaw, pitch, data: {url, title}}],
+        repacked_existing: [{id, yaw, pitch}]  — updated positions for existing markers
+      }
+    """
+    gen_id = body.get("generation_id", "").strip()
+    images_b64: list[str] = body.get("images") or []
+    current_markers = body.get("current_markers") or []
+    view_yaw = float(body.get("view_yaw", 0))
+    view_pitch = float(body.get("view_pitch", 0))
+    strictness = float(body.get("strictness", 0.55))
+
+    if not gen_id:
+        return JSONResponse({"error": "generation_id required"}, status_code=400)
+    if not images_b64:
+        return JSONResponse({"error": "images required"}, status_code=400)
+
+    # Decode base64 images (accept data URIs or raw).
+    def strip_prefix(s: str) -> str:
+        if s.startswith("data:") and "," in s:
+            return s.split(",", 1)[1]
+        return s
+
+    try:
+        raw_bytes = [base64.b64decode(strip_prefix(s)) for s in images_b64]
+    except Exception as e:
+        return JSONResponse({"error": f"decode failed: {e}"}, status_code=400)
+
+    # Upscale via fal.ai ESRGAN (cost-logged under feature=upload_markers).
+    loop = asyncio.new_event_loop()
+    try:
+        upscaled = loop.run_until_complete(
+            upscale_all_parallel(
+                raw_bytes,
+                generation_id=gen_id,
+                feature="upload_markers",
+                image_kind="user_upload",
+            )
+        )
+    finally:
+        loop.close()
+
+    # Upload each upscaled image under uploads/{gen_id}/ for permanence.
+    new_marker_records = []
+    n = len(upscaled)
+    spacing_deg = 25.0 if n > 1 else 0
+    for i, img_bytes in enumerate(upscaled):
+        image_id = uuid.uuid4().hex[:10]
+        path = f"uploads/{gen_id}/{image_id}.jpg"
+        upload_to_supabase(path, img_bytes)
+        url = (
+            f"{SUPABASE_URL}/storage/v1/object/public/spheres/{path}"
+            if SUPABASE_URL
+            else f"/spheres/{path}"
+        )
+        # Initial placement — spread along an arc centred on the user's view.
+        offset = (i - (n - 1) / 2.0) * spacing_deg
+        init_yaw = view_yaw + offset
+        while init_yaw > 180:
+            init_yaw -= 360
+        while init_yaw <= -180:
+            init_yaw += 360
+        new_marker_records.append({
+            "id": f"image-upload-{image_id}",
+            "type": "image",
+            "yaw": init_yaw,
+            "pitch": view_pitch,
+            "scene_width": 300,
+            "url": url,
+        })
+
+    # Harmony-pack: combine existing + new, let the packer resolve collisions.
+    def default_width(t: str) -> float:
+        return {"profile": 320, "video": 360, "image": 160, "audio": 280, "bio-links": 300}.get(t, 300)
+
+    packer_input = [
+        {
+            "id": str(m.get("id", "")),
+            "type": str(m.get("type", "")),
+            "yaw": float(m.get("yaw", 0)),
+            "pitch": float(m.get("pitch", 0)),
+            "scene_width": float(m.get("scene_width") or default_width(str(m.get("type", "")))),
+        }
+        for m in current_markers
+    ] + [
+        {
+            "id": m["id"],
+            "type": m["type"],
+            "yaw": m["yaw"],
+            "pitch": m["pitch"],
+            "scene_width": m["scene_width"],
+        }
+        for m in new_marker_records
+    ]
+
+    from scene_analyzer import _pack_harmonically
+    _pack_harmonically(packer_input, strictness=strictness)
+    pos_by_id = {p["id"]: p for p in packer_input}
+
+    return {
+        "new_markers": [
+            {
+                "id": m["id"],
+                "type": "image",
+                "yaw": pos_by_id[m["id"]]["yaw"],
+                "pitch": pos_by_id[m["id"]]["pitch"],
+                "data": {"url": m["url"], "title": ""},
+            }
+            for m in new_marker_records
+        ],
+        "repacked_existing": [
+            {
+                "id": str(m.get("id", "")),
+                "yaw": pos_by_id[str(m.get("id", ""))]["yaw"],
+                "pitch": pos_by_id[str(m.get("id", ""))]["pitch"],
+            }
+            for m in current_markers
+            if str(m.get("id", "")) in pos_by_id
+        ],
+    }
+
+
 @app.post("/repack-markers")
 async def repack_markers(body: dict):
     """Category exclusion + harmony repack (patent US '666).
