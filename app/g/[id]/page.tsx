@@ -9,7 +9,7 @@ import { SphereSpecViewer } from "@/components/SphereSpecViewer"
 import { ImageUploader } from "@/components/ImageUploader"
 import { getGeneration } from "@/lib/dummy-data"
 import { supabase, deleteGeneration, GenerationRow } from "@/lib/supabase"
-import { startUploadGeneration, pollStatus } from "@/lib/pipeline-client"
+import { startUploadGeneration, pollStatus, uploadAsMarkers } from "@/lib/pipeline-client"
 import { GenerationProgress } from "@/components/GenerationProgress"
 import { PipelineStep } from "@/lib/types"
 
@@ -227,17 +227,97 @@ export default function PublicSharePage({
               <ImageUploader
                 onUpload={async (images, composite) => {
                   const isComposite = composite && viewData.tile_stem && viewData.tile_base_url
+
+                  // Composite mode — upscale + pack as interactive image markers
+                  // on the SAME gen_id. Keeps analytics / copilot / categories /
+                  // reroll all pointed at this sphere instead of spawning a new
+                  // gen every time the user adds images.
+                  if (isComposite) {
+                    setGenerating(true)
+                    setGenLabel(`Upscaling ${images.length} image${images.length === 1 ? "" : "s"}…`)
+                    setPct(20)
+                    try {
+                      const existing = (viewData.markers ?? []) as any[]
+                      const normalized = existing.map((m, i) => {
+                        const id =
+                          m.type === "profile" ? "profile-card"
+                          : m.type === "video" ? `video-${(m.data ?? {}).video_id}`
+                          : m.type === "audio" ? `audio-${i}-${encodeURIComponent((m.data ?? {}).url || "").slice(0, 24)}`
+                          : m.type === "bio-links" ? `bio-links-${i}`
+                          : `image-${i}`
+                        return {
+                          id,
+                          type: m.type,
+                          yaw: m.yaw,
+                          pitch: m.pitch,
+                          scene_width: m.scene_width,
+                        }
+                      })
+                      setGenLabel("Harmony-packing new markers…")
+                      setPct(70)
+                      const { new_markers, repacked_existing } = await uploadAsMarkers({
+                        generationId: id,
+                        images,
+                        currentMarkers: normalized,
+                        viewYaw: 0,
+                        viewPitch: 0,
+                      })
+                      setPct(90)
+
+                      // Merge: existing markers get new positions, new markers get appended.
+                      const posById = new Map(repacked_existing.map((p) => [p.id, p]))
+                      const mergedExisting = existing.map((m, i) => {
+                        const mid =
+                          m.type === "profile" ? "profile-card"
+                          : m.type === "video" ? `video-${(m.data ?? {}).video_id}`
+                          : m.type === "audio" ? `audio-${i}-${encodeURIComponent((m.data ?? {}).url || "").slice(0, 24)}`
+                          : m.type === "bio-links" ? `bio-links-${i}`
+                          : `image-${i}`
+                        const p = posById.get(mid)
+                        return p ? { ...m, yaw: p.yaw, pitch: p.pitch } : m
+                      })
+                      const appended = [
+                        ...mergedExisting,
+                        ...new_markers.map((nm) => ({
+                          type: "image",
+                          yaw: nm.yaw,
+                          pitch: nm.pitch,
+                          data: nm.data,
+                          scene_scale: 1,
+                        })),
+                      ]
+
+                      // Persist back to Supabase via the same path the viewer uses on Save.
+                      if (supabase) {
+                        await supabase
+                          .from("generations")
+                          .update({ environment: { markers: appended, profile: (viewData as any).profile ?? null } })
+                          .eq("id", id)
+                      }
+
+                      setViewData({ ...viewData, markers: appended })
+                      setPct(100)
+                      setGenLabel(`Added ${new_markers.length} marker${new_markers.length === 1 ? "" : "s"}`)
+                      setGenerating(false)
+                    } catch (err) {
+                      setGenLabel(`Failed: ${err instanceof Error ? err.message : "upload error"}`)
+                      setGenerating(false)
+                    }
+                    return
+                  }
+
+                  // New Sphere mode — unchanged: spawn a fresh gen.
                   setGenerating(true)
                   setStep("scan_profile")
                   setPct(0)
-                  setGenLabel(isComposite ? "Compositing onto environment..." : "Processing uploads...")
+                  setGenLabel("Processing uploads...")
 
                   try {
                     const { id: genId } = await startUploadGeneration(
                       images,
                       viewData.prompt,
-                      isComposite ? viewData.tile_stem || undefined : undefined,
-                      isComposite ? viewData.tile_base_url || undefined : undefined,
+                      undefined,
+                      undefined,
                     )
 
                     let pollFailures = 0

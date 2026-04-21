@@ -196,6 +196,50 @@ export async function repackMarkers(
   return res.json()
 }
 
+export interface UploadAsMarkersInput {
+  generationId: string
+  images: string[] // data URIs
+  currentMarkers: Array<{
+    id: string
+    type: string
+    yaw: number
+    pitch: number
+    scene_width?: number
+  }>
+  viewYaw?: number
+  viewPitch?: number
+  strictness?: number
+}
+
+export async function uploadAsMarkers(input: UploadAsMarkersInput): Promise<{
+  new_markers: Array<{
+    id: string
+    type: string
+    yaw: number
+    pitch: number
+    data: { url: string; title: string }
+  }>
+  repacked_existing: Array<{ id: string; yaw: number; pitch: number }>
+}> {
+  const res = await fetch(`${PIPELINE_URL}/upload-as-markers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      generation_id: input.generationId,
+      images: input.images,
+      current_markers: input.currentMarkers,
+      view_yaw: input.viewYaw ?? 0,
+      view_pitch: input.viewPitch ?? 0,
+      strictness: input.strictness ?? 0.55,
+    }),
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || "Upload-as-markers failed")
+  }
+  return res.json()
+}
+
 export async function checkPipelineHealth(): Promise<boolean> {
   try {
     const res = await fetch(`${PIPELINE_URL}/health`, { signal: AbortSignal.timeout(2000) })

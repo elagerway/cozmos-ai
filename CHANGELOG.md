@@ -44,6 +44,12 @@
 - Session history persisted in sessionStorage per sphere
 - Every turn cost-logged under `feature=copilot`, session_id attached for per-conversation breakdown
 
+### Upload images as interactive markers (Composite mode rewrite)
+- `POST /upload-as-markers` pipeline endpoint — ESRGAN-upscales each uploaded image, uploads under `uploads/{gen_id}/`, and harmony-packs them as `image` markers against the sphere's existing marker set. Stays on the SAME `gen_id` — analytics, copilot, reroll, category exclusion, and heatmap all keep working against this sphere
+- `lib/pipeline-client.ts` extended with `uploadAsMarkers()`
+- `/g/[id]/page.tsx` Composite branch rewritten to call `uploadAsMarkers` + merge positions + persist markers via Supabase. "New Sphere" mode unchanged (still spawns a fresh gen via `startUploadGeneration`)
+- Uploaded images are now fully interactive: drag-to-move, corner resize, copilot-addressable, category-excludable, heatmap-tracked
+
 ### Category exclusion + repack (patent US '666)
 - New `POST /repack-markers` pipeline endpoint — filters markers by `excluded_types` / `excluded_platforms` / `excluded_tags` / `strictness`, re-runs `_pack_harmonically` on the kept subset so remaining markers spread into the freed space with anchor-pull + collision resolution
 - `CategoryExcludeModal.tsx` — checkbox UI with live per-category counts + strictness slider
