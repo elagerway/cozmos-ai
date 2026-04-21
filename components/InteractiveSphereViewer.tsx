@@ -5,6 +5,7 @@ import { createPortal } from "react-dom"
 import "@photo-sphere-viewer/core/index.css"
 import "@photo-sphere-viewer/markers-plugin/index.css"
 import { AddMarkerModal } from "./AddMarkerModal"
+import { useEventTracker } from "@/lib/event-tracker"
 
 interface VideoMarkerData {
   video_id: string
@@ -58,6 +59,10 @@ interface Props {
   tileBaseUrl?: string | null
   markers?: MarkerDef[]
   onMarkersChanged?: (markers: MarkerDef[]) => void | Promise<void>
+  // Sphere ID for event telemetry (patents GB '335 / US '706). When set,
+  // user interactions are batched-posted to /api/events for heatmap building
+  // and data-driven regeneration (GB '934 / WO '623).
+  sphereId?: string | null
 }
 
 const LEVELS = [
@@ -284,7 +289,12 @@ function BioLinksHTML(data: BioLinksMarkerData, width: number = 300): string {
   `
 }
 
-export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, markers = [], onMarkersChanged }: Props) {
+export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, markers = [], onMarkersChanged, sphereId }: Props) {
+  const track = useEventTracker(sphereId ?? null)
+  // Latest track fn kept in a ref so PSV listener closures always call the
+  // current one even across re-renders (React re-creates track otherwise).
+  const trackRef = useRef(track)
+  useEffect(() => { trackRef.current = track }, [track])
   const containerRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<any>(null)
   const [loading, setLoading] = useState(true)
@@ -480,12 +490,43 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
       // Expose psv-container to React so overlays can portal into it (visible in fullscreen).
       setPsvHost(containerRef.current?.querySelector(".psv-container") as HTMLElement | null)
 
+      // Event telemetry: sphere opened (patent GB '335 / US '706)
+      trackRef.current("sphere_open")
+
       // Pitch lock — force straight ahead when 360 is off
+      // Also emits throttled "pan" telemetry.
+      let lastPanTrackAt = 0
       viewer.addEventListener("before-rotate", (e: any) => {
-        if (!lock360Ref.current) return
-        if (e.position) {
+        if (!lock360Ref.current) {
+          // no-op for pitch; still want to record the pan
+        } else if (e.position) {
           e.position.pitch = 0
         }
+        const now = Date.now()
+        if (e.position && now - lastPanTrackAt > 1000) {
+          lastPanTrackAt = now
+          trackRef.current("pan", {
+            meta: {
+              yaw_deg: +((e.position.yaw * 180) / Math.PI).toFixed(2),
+              pitch_deg: +((e.position.pitch * 180) / Math.PI).toFixed(2),
+            },
+          })
+        }
+      })
+
+      // Zoom telemetry, throttled to 1 s.
+      let lastZoomTrackAt = 0
+      viewer.addEventListener("zoom-updated", (e: any) => {
+        const now = Date.now()
+        if (now - lastZoomTrackAt < 1000) return
+        lastZoomTrackAt = now
+        const zoom = typeof e.zoomLevel === "number" ? e.zoomLevel : viewer.getZoomLevel()
+        trackRef.current("zoom", {
+          meta: {
+            zoom_level: +zoom.toFixed(1),
+            fov_deg: +viewer.dataHelper.zoomLevelToFov(zoom).toFixed(2),
+          },
+        })
       })
 
       // Marker scaling — PSV calls the `scale` function on every render, so it
@@ -739,12 +780,39 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
           psvContainer?.removeEventListener("mousedown", onEditMousedown, true)
         }
 
+        // Marker dwell telemetry (patent GB '335 / US '706). Record
+        // `marker_dwell` with duration_ms when a hover exceeds 500 ms.
+        const hoverStart: Record<string, number> = {}
+        markersPlugin.addEventListener("enter-marker", (e: any) => {
+          const id = (e.marker?.config || e.marker)?.id
+          if (id) hoverStart[id] = Date.now()
+        })
+        markersPlugin.addEventListener("leave-marker", (e: any) => {
+          const cfg = e.marker?.config || e.marker
+          const id = cfg?.id
+          if (!id || !hoverStart[id]) return
+          const duration_ms = Date.now() - hoverStart[id]
+          delete hoverStart[id]
+          if (duration_ms >= 500) {
+            trackRef.current("marker_dwell", {
+              marker_id: id,
+              meta: { marker_type: cfg?.data?.markerType || null, duration_ms },
+            })
+          }
+        })
+
         // Handle marker clicks (non-edit mode): video play/stop
         markersPlugin.addEventListener("select-marker", (e: any) => {
           if (editModeRef.current) return
           const markerConfig = e.marker?.config || e.marker
           const markerId = markerConfig?.id || ""
           const data = markerConfig?.data
+
+          // Event telemetry: marker_select (patent GB '335 / US '706)
+          trackRef.current("marker_select", {
+            marker_id: markerId,
+            meta: { marker_type: data?.markerType || null },
+          })
 
           if (!data?.video_id) return
 

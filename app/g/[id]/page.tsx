@@ -183,6 +183,7 @@ export default function PublicSharePage({
                     tileStem={viewData.tile_stem}
                     tileBaseUrl={viewData.tile_base_url}
                     markers={viewData.markers}
+                    sphereId={id}
                     onMarkersChanged={async (updatedMarkers) => {
                       // Save updated positions to Supabase. Persist the raw
                       // brand as profile.name — NOT viewData.title, which is
