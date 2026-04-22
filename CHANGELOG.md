@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-04-22
+
+### Marker redesign — flat glass panels (fbd1c20)
+- Markers were dressed as faux-3D objects (TV bezels, wood picture frames, speaker cones) that conflicted with their camera-facing billboard behaviour, which read as a visual bug.
+- Replaced all five marker types (profile / video thumbnail / video playing / image / audio / bio-links) with a shared `CARD_STYLE`: semi-transparent near-black fill with `backdrop-blur`, 1px hairline border, 14px radius, minimal shadow.
+- Billboards remain — but now they look intentional: info cards overlaid on the sphere, not fake wall-mounted objects. Short-lived "wall-aligned perspective" experiment (153cd46) was reverted in 00d0481.
+
+### Modals render inside sphere container (d1a31c6)
+- `RerollBackgroundModal` and `CategoryExcludeModal` previously self-portaled into `document.body`, which sits OUTSIDE the fullscreen PSV element — in fullscreen edit mode the modals opened invisibly behind the viewer.
+- Removed internal `createPortal` from both; viewer now wraps them in `createPortal(..., psvHost)` at render time, matching `AddMarkerModal`'s pattern. Modals appear inside the sphere in both normal and fullscreen.
+
+### Comfort toggle — label + default ON (1d2417a, b9f680e)
+- Active-state label: "👁 Comfort" → "👁 Comfort Enabled" (was "Reduced")
+- First-visit default flipped from OFF to ON so new visitors get motion-reduced behaviour out of the gate; stored opt-outs in localStorage still stick.
+
+### Category exclusion — allow repack-only flow (f805c2b)
+- "Apply & repack" button no longer requires at least one excluded category. Strictness changes alone now repack the existing marker set (same `_pack_harmonically` call with new strictness). Button label switches between "Repack" and "Apply & repack".
+
+### Hero copy accuracy (a1e395a)
+- Homepage headline "biosphere in seconds" → "biosphere in a few minutes" — accurate against the 2–5 min end-to-end generation time.
+
+### Vercel build unblocked (7f5a481)
+- Four strict-type-check errors were silently failing Vercel's production build since commit `0ee322f`, freezing deploys at a pre-Copilot SHA.
+  1. `admin/costs` route — `existing` inferred as a union without optional token fields; annotated as `ServiceTotal`.
+  2. `admin/storage-snapshot` route — Supabase client generic mismatch in helper param; loosened.
+  3. `InteractiveSphereViewer` — PSV `Viewer.renderer` is private; cast sites to `any` at the rig hook-in.
+  4. `viewer-camera` — `import("three")` implicit `any`; added `@types/three` as dev dep.
+- Also excluded nested `pipeline/` clone from `tsconfig.json` so stale mirrored files from the other working tree don't pollute future builds.
+
+### Docs
+- New `.audit/notes/patent-alignment-executive.html` + `Biosphere-Patent-Alignment-2026-04-22.pdf` — c-suite-ready patent alignment recap.
+- New `.audit/notes/biosphere-gtm-architecture-cost.md` + `Biosphere-GTM-Architecture-Cost-2026-04-22.pdf` — architecture, full API + cost analysis (confirmed via vendor APIs), scale readiness, GTM plan, future product surfaces (User Portal, Admin Panel, Public API, MCP server).
+
 ## 2026-04-21
 
 ### Cost tracking instrumentation
