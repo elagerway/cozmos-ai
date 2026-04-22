@@ -421,7 +421,7 @@ export default function HomePage() {
           <span className="bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">
             interactive 360°
           </span>{" "}
-          biosphere in seconds
+          biosphere in a few minutes
         </h1>
         <p className="text-lg text-muted-foreground max-w-2xl mx-auto mb-10 leading-relaxed">
           Describe your bio in plain English. Point to a social media
