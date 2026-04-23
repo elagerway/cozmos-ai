@@ -2,6 +2,14 @@
 
 ## 2026-04-23
 
+### User-uploaded background images with AI outpaint fallback
+- New `POST /generate-from-bg-upload` endpoint. Accepts any image ≥ 1024 wide.
+- If aspect is ~2:1 (1.8–2.2), the upload is used directly as the sphere background — no AI cost, fastest path.
+- Else, the image is sent to Gemini 3 Pro Image (`gemini-3-pro-image-preview`) with an outpaint prompt to extend it into a seamless 360° equirectangular panorama, then tiled. ~30–60s, ~$0.24/call.
+- Gemini path requires `GEMINI_API_KEY` on the pipeline env. Endpoint raises if unset.
+- Cost logging: new `log_gemini_imagegen()` helper in `cost_tracker.py` records each outpaint call under service `google_gemini`, operation `bg_upload_outpaint`, feature `background`.
+- Tile pyramid is built in both paths; `high_res=true` when the source is ≥ 12288 wide (equirect path only — Gemini outputs ~6336 wide, so auto-stays 3-tier).
+
 ### Copilot chat — full pointer/touch event isolation
 - Copilot panel was portaled into PSV's own container and only stopped `mousedown` / `wheel` / `keydown`. PSV 5.x drives drag off pointer + touch events, so cursor moves inside the panel were rotating the sphere and dragging markers underneath.
 - Panel root now stops propagation on the full set: `mouse*`, `pointer*`, `touch*`, `click`, `contextMenu`, `wheel`, `keyDown`. Drag-inside-panel no longer leaks to the viewer.

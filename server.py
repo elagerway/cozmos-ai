@@ -26,7 +26,7 @@ import pyvips
 pyvips.cache_set_max_mem(100 * 1024 * 1024)  # 100MB cache max
 pyvips.cache_set_max(50)
 import httpx
-from cost_tracker import log_fal_esrgan
+from cost_tracker import log_fal_esrgan, log_gemini_imagegen
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -2120,6 +2120,203 @@ async def generate_from_uploads(body: dict):
     })
     executor.submit(run_upload_pipeline, gen_id, raw_images)
     return {"id": gen_id}
+
+
+@app.post("/generate-from-bg-upload")
+async def generate_from_bg_upload(body: dict):
+    """Accept a single equirectangular image and use it directly as the sphere
+    background. No AI generation, no marker composite. Tile pyramid is sized
+    to the source — high_res (4 tiers) when width >= 12288, else 3 tiers.
+    """
+    prompt = (body.get("prompt") or "").strip() or "Uploaded 360° background"
+    img_b64 = body.get("image", "")
+    brand = (body.get("brand") or "").strip() or None
+
+    if not img_b64:
+        return JSONResponse({"error": "No image provided"}, status_code=400)
+
+    if "," in img_b64:
+        img_b64 = img_b64.split(",", 1)[1]
+
+    try:
+        raw_bytes = base64.b64decode(img_b64)
+    except Exception as e:
+        return JSONResponse({"error": f"Invalid base64: {e}"}, status_code=400)
+
+    try:
+        with Image.open(BytesIO(raw_bytes)) as probe:
+            w, h = probe.size
+    except Exception as e:
+        return JSONResponse({"error": f"Not a valid image: {e}"}, status_code=400)
+
+    if w < 1024:
+        return JSONResponse(
+            {"error": f"Image too small ({w}×{h}). Need at least 1024 px wide."},
+            status_code=400,
+        )
+
+    ratio = w / h
+    is_equirect = 1.8 <= ratio <= 2.2
+
+    gen_id = f"gen-bg-upload-{uuid.uuid4().hex[:8]}"
+    # high_res is best-effort — we only know source dim; Gemini path produces
+    # ~6336 wide, which is below the 12288 threshold, so it'll stay 3-tier.
+    high_res = is_equirect and w >= 12288
+
+    generations[gen_id] = {
+        "id": gen_id,
+        "brand": brand or "",
+        "prompt": prompt,
+        "status": "running",
+        "step": "init",
+        "pct": 0,
+        "label": "Processing upload...",
+        "high_res": high_res,
+    }
+
+    save_generation_record(gen_id, {
+        "brand": brand,
+        "prompt": prompt,
+        "status": "running",
+        "step": "init",
+        "step_label": "Processing upload...",
+        "high_res": high_res,
+    })
+
+    executor.submit(run_bg_upload_pipeline, gen_id, raw_bytes, high_res, is_equirect)
+    return {"id": gen_id}
+
+
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+
+
+def _gemini_outpaint_to_equirect(raw_bytes: bytes) -> bytes:
+    """Send an arbitrary image to Gemini 3 Pro Image with an outpaint prompt
+    to produce a 360° equirectangular panorama. Returns JPEG bytes."""
+    if not GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY not set on the pipeline")
+
+    import json
+    import urllib.request
+    b64 = base64.b64encode(raw_bytes).decode()
+    prompt = (
+        "Convert this image into a seamless 360-degree equirectangular panorama. "
+        "Use the original scene as the primary forward view, then naturally extend "
+        "the environment outward the full 360 degrees around the camera — complete "
+        "the sides, behind the camera, the ceiling/sky above, and the ground below. "
+        "Keep the style, lighting, and content consistent with the source. "
+        "The left and right edges must wrap seamlessly. The image should cover a "
+        "full 360x180 field of view as a true equirectangular projection."
+    )
+    body = {
+        "contents": [{
+            "role": "user",
+            "parts": [
+                {"text": prompt},
+                {"inline_data": {"mime_type": "image/jpeg", "data": b64}},
+            ],
+        }],
+        "generationConfig": {
+            "responseModalities": ["TEXT", "IMAGE"],
+            "imageConfig": {"aspectRatio": "21:9", "imageSize": "4K"},
+        },
+    }
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"gemini-3-pro-image-preview:generateContent?key={GEMINI_API_KEY}"
+    )
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=600) as resp:
+        payload = json.loads(resp.read())
+
+    for cand in payload.get("candidates", []):
+        for part in cand.get("content", {}).get("parts", []):
+            inline = part.get("inlineData") or part.get("inline_data")
+            if inline:
+                return base64.b64decode(inline["data"])
+    raise RuntimeError("Gemini returned no image")
+
+
+def run_bg_upload_pipeline(gen_id: str, raw_bytes: bytes, high_res: bool, is_equirect: bool):
+    start = time.time()
+
+    def update(step: str, pct: int, label: str):
+        generations[gen_id].update({"step": step, "pct": pct, "label": label})
+
+    try:
+        if not is_equirect:
+            update("upscale", 15, "Extending image into a 360° environment...")
+            raw_bytes = _gemini_outpaint_to_equirect(raw_bytes)
+            log_gemini_imagegen(
+                model="gemini-3-pro-image-preview",
+                generation_id=gen_id,
+                feature="background",
+                operation="bg_upload_outpaint",
+            )
+            update("compose", 55, "360° environment ready")
+
+        update("compose", 60, "Loading image...")
+        canvas = pyvips.Image.new_from_buffer(raw_bytes, "")
+
+        w, h = canvas.width, canvas.height
+        target_h = w // 2
+
+        if h != target_h:
+            update("compose", 65, f"Normalizing to 2:1 ({w}×{target_h})...")
+            canvas = canvas.resize(
+                1.0,
+                kernel=pyvips.enums.Kernel.LANCZOS3,
+                vscale=target_h / canvas.height,
+            )
+
+        update("tiles", 70, "Generating tile pyramid...")
+
+        def on_tile_progress(done, total):
+            pct = 30 + int(60 * (done / total))
+            update("tiles", pct, f"Generating tiles ({done}/{total})...")
+
+        generate_tiles(canvas, gen_id, on_progress=on_tile_progress, high_res=high_res)
+        update("tiles", 92, "Tiles generated")
+
+        duration = int(time.time() - start)
+        if SUPABASE_URL:
+            tile_base_url = f"{SUPABASE_URL}/storage/v1/object/public/spheres"
+            image_url = f"{tile_base_url}/{gen_id}.jpg"
+        else:
+            tile_base_url = ""
+            image_url = f"/spheres/{gen_id}.jpg"
+
+        update_generation_status(gen_id, {
+            "status": "done",
+            "step": "done",
+            "step_label": f"Your HD sphere is ready [{COMMIT_HASH}]",
+            "image_url": image_url,
+            "tile_stem": gen_id,
+            "tile_base_url": tile_base_url,
+            "duration_s": duration,
+            "image_count": 1,
+            "cost_usd": 0,
+            "high_res": high_res,
+        })
+
+        generations[gen_id].update({
+            "status": "done", "step": "done", "pct": 100,
+            "label": "Your HD sphere is ready",
+            "image_url": image_url,
+            "tile_stem": gen_id,
+            "tile_base_url": tile_base_url,
+            "duration_s": duration,
+        })
+        print(f"BG upload complete: {gen_id} in {duration}s (high_res={high_res})")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        generations[gen_id].update({"status": "failed", "error": str(e)})
+        update_generation_status(gen_id, {"status": "failed", "error": str(e)})
 
 
 def run_pipeline_with_images(gen_id: str, raw_images: list[bytes]):

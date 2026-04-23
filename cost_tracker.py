@@ -41,6 +41,13 @@ BLOCKADE_FLAT = {
 
 FAL_ESRGAN_PER_MP = 0.0025
 
+# Gemini 3 Pro Image (Nano Banana Pro) — token-based. Rough flat-rate estimate
+# per 4K output image for logging; refine when Google publishes per-size
+# breakdowns. Per https://ai.google.dev/gemini-api/docs/pricing (2026-04).
+GEMINI_IMAGEGEN_PER_CALL = {
+    "gemini-3-pro-image-preview": 0.24,
+}
+
 
 def price_anthropic(model: str, input_tokens: int, output_tokens: int) -> float:
     rates = ANTHROPIC_RATES.get(model)
@@ -163,6 +170,34 @@ def log_fal_esrgan(
         "model": "fal-ai/esrgan",
         "input_units": output_megapixels,
         "unit_type": "megapixels",
+        "cost_usd": round(cost, 6),
+        "generation_id": generation_id,
+        "feature": feature,
+        "metadata": meta,
+    })
+    return cost
+
+
+def log_gemini_imagegen(
+    *,
+    model: str,
+    generation_id: Optional[str] = None,
+    feature: Feature = "background",
+    operation: str = "imagegen_bg_upload_outpaint",
+    metadata: Optional[dict[str, Any]] = None,
+) -> float:
+    """Log a Gemini image-generation call. Flat per-call estimate until Google
+    publishes final per-token breakdowns for gpt-image-2-class models."""
+    cost = GEMINI_IMAGEGEN_PER_CALL.get(model, 0.24)
+    meta = {"model": model}
+    if metadata:
+        meta.update(metadata)
+    _insert_row({
+        "service": "google_gemini",
+        "operation": operation,
+        "model": model,
+        "input_units": 1,
+        "unit_type": "calls",
         "cost_usd": round(cost, 6),
         "generation_id": generation_id,
         "feature": feature,
