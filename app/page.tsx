@@ -352,15 +352,17 @@ export default function HomePage() {
 
           if (status.status === "done") {
             clearInterval(poll)
+            // Dismiss the progress modal first so any downstream setter that
+            // throws can't strand the user on a 100%-but-still-running screen.
+            setDone(true)
+            setGenerating(false)
             setStep("done")
             setImageUrl(status.image_url || null)
             setTileStem(status.tile_stem || null)
             setTileBaseUrl(status.tile_base_url || null)
             setDurationS(status.duration_s || 20)
-            setSpec(getRandomSpec())
+            setSpec(null)
             setBgPrompt(`HD 360° background from your uploaded ${width}×${height} photo.`)
-            setDone(true)
-            setGenerating(false)
           } else if (status.status === "failed") {
             clearInterval(poll)
             setGenError(status.error || "Upload failed")
