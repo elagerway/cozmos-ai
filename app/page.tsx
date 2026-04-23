@@ -19,8 +19,9 @@ import {
 } from "@/lib/dummy-data"
 import { SOCIAL_SAMPLE_BRIEFS, detectSocialProfile, SocialProfile } from "@/lib/social-profiles"
 import { simulatePipeline } from "@/lib/simulate-pipeline"
-import { startGeneration, startUploadGeneration, pollStatus, checkPipelineHealth } from "@/lib/pipeline-client"
+import { startGeneration, startUploadGeneration, startBgUploadGeneration, pollStatus, checkPipelineHealth } from "@/lib/pipeline-client"
 import { ImageUploader } from "@/components/ImageUploader"
+import { BackgroundImageUploader } from "@/components/BackgroundImageUploader"
 import { PipelineStep, SphereSpec } from "@/lib/types"
 import { fetchGenerations, GenerationRow } from "@/lib/supabase"
 
@@ -310,6 +311,77 @@ export default function HomePage() {
     }
   }
 
+  async function handleBackgroundUpload(dataUri: string, width: number, height: number) {
+    setSubmittedPrompt(`Uploaded 360° photo (${width}×${height})`)
+    setDetectedProfile(null)
+    setGenerating(true)
+    setDone(false)
+    setImageUrl(null)
+    setTileStem(null)
+    setTileBaseUrl(null)
+    setLowResWarning(false)
+    setGenError(null)
+    setSpec(null)
+    setBgPrompt(null)
+    setStep("scan_profile")
+    setPct(0)
+    setLabel("Uploading your 360° photo...")
+
+    setTimeout(() => {
+      resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    }, 100)
+
+    cleanupRef.current?.()
+
+    try {
+      const { id: genId } = await startBgUploadGeneration({
+        image: dataUri,
+        prompt: prompt || "Uploaded 360° background",
+      })
+      setActiveGenId(genId)
+
+      let pollFailures = 0
+      const poll = setInterval(async () => {
+        try {
+          const status = await pollStatus(genId)
+          pollFailures = 0
+          setPct(status.pct)
+          setLabel(status.label)
+          if (status.step === "compose") setStep("bg_prompt")
+          else if (status.step === "tiles" || status.step === "save") setStep("process")
+
+          if (status.status === "done") {
+            clearInterval(poll)
+            setStep("done")
+            setImageUrl(status.image_url || null)
+            setTileStem(status.tile_stem || null)
+            setTileBaseUrl(status.tile_base_url || null)
+            setDurationS(status.duration_s || 20)
+            setSpec(getRandomSpec())
+            setBgPrompt(`HD 360° background from your uploaded ${width}×${height} photo.`)
+            setDone(true)
+            setGenerating(false)
+          } else if (status.status === "failed") {
+            clearInterval(poll)
+            setGenError(status.error || "Upload failed")
+            setGenerating(false)
+          }
+        } catch {
+          pollFailures++
+          if (pollFailures >= 10) {
+            clearInterval(poll)
+            setLabel("Lost connection to pipeline — please try again")
+            setGenerating(false)
+          }
+        }
+      }, 1000)
+      cleanupRef.current = () => clearInterval(poll)
+    } catch (err) {
+      setGenError(err instanceof Error ? err.message : "Upload failed")
+      setGenerating(false)
+    }
+  }
+
   const SUPABASE_CDN = process.env.NEXT_PUBLIC_SUPABASE_URL
     ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/spheres`
     : ""
@@ -424,9 +496,8 @@ export default function HomePage() {
           biosphere in a few minutes
         </h1>
         <p className="text-lg text-muted-foreground max-w-2xl mx-auto mb-10 leading-relaxed">
-          Describe your bio in plain English. Point to a social media
-          profile for style inspiration. Our AI extracts the brand&apos;s visual
-          identity and generates a fully-interactive biosphere.
+          AI-generated biospheres are sharp at a glance and soft at deep zoom.
+          For true HD, upload your own equirectangular 360° photo below.
         </p>
 
         {/* Generation form */}
@@ -480,6 +551,30 @@ export default function HomePage() {
           >
             {generating ? "Generating..." : "Generate Sphere"}
           </Button>
+
+          <div className="relative my-8">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-white/10" />
+            </div>
+            <div className="relative flex justify-center">
+              <span className="px-3 bg-background text-[10px] uppercase tracking-[0.2em] text-muted-foreground/60">
+                or for true HD
+              </span>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <h2 className="text-base font-semibold text-foreground/90">
+              Upload your own photo
+            </h2>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Drop any image — a real 360° capture renders pixel-for-pixel, anything else gets extended into a full 360° environment by AI. Larger source = sharper zoom.
+            </p>
+          </div>
+          <BackgroundImageUploader
+            onUpload={handleBackgroundUpload}
+            disabled={generating}
+          />
         </div>
       </section>
 

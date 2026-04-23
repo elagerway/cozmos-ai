@@ -61,6 +61,27 @@ export async function startUploadGeneration(
   return res.json()
 }
 
+export async function startBgUploadGeneration(input: {
+  image: string
+  prompt?: string
+  brand?: string
+}): Promise<{ id: string }> {
+  const res = await fetch(`${PIPELINE_URL}/generate-from-bg-upload`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      image: input.image,
+      prompt: input.prompt || "",
+      brand: input.brand || "",
+    }),
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || "Failed to start background upload")
+  }
+  return res.json()
+}
+
 export interface RerollBackgroundInput {
   generationId: string
   prompt: string

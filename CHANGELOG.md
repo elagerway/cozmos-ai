@@ -2,13 +2,13 @@
 
 ## 2026-04-23
 
-### User-uploaded background images with AI outpaint fallback
-- New `POST /generate-from-bg-upload` endpoint. Accepts any image ≥ 1024 wide.
-- If aspect is ~2:1 (1.8–2.2), the upload is used directly as the sphere background — no AI cost, fastest path.
-- Else, the image is sent to Gemini 3 Pro Image (`gemini-3-pro-image-preview`) with an outpaint prompt to extend it into a seamless 360° equirectangular panorama, then tiled. ~30–60s, ~$0.24/call.
-- Gemini path requires `GEMINI_API_KEY` on the pipeline env. Endpoint raises if unset.
-- Cost logging: new `log_gemini_imagegen()` helper in `cost_tracker.py` records each outpaint call under service `google_gemini`, operation `bg_upload_outpaint`, feature `background`.
-- Tile pyramid is built in both paths; `high_res=true` when the source is ≥ 12288 wide (equirect path only — Gemini outputs ~6336 wide, so auto-stays 3-tier).
+### Upload-a-photo second flow — frontend + pipeline
+- New pipeline endpoint `POST /generate-from-bg-upload` accepts any image ≥ 1024 wide. If aspect is ~2:1 (1.8–2.2), the upload is used directly as the sphere background — no AI cost, ~20 s end-to-end. Else the image is sent to Gemini 3 Pro Image (`gemini-3-pro-image-preview`) with an outpaint prompt to extend it into a seamless 360° equirectangular panorama, then tiled. ~30–60 s, ~$0.24/call. Requires `GEMINI_API_KEY` on the pipeline env. Cost logging via new `log_gemini_imagegen()` helper.
+- Home page now has two stacked flows: the existing brief textarea + Generate Sphere, and a new "Upload your own photo" section with `BackgroundImageUploader`.
+- Hero copy: "AI-generated biospheres are sharp at a glance and soft at deep zoom. For true HD, upload your own equirectangular 360° photo below." Sets expectations about AI-gen fidelity and points to the upload flow.
+- `BackgroundImageUploader` is a single-image drop zone — no equirectangular jargon in the UI. Live hint per image: *"Looks like a 360° photo — will render as-is"* vs *"Will be extended to 360° by AI (~30–60s)"*.
+- `startBgUploadGeneration` in `lib/pipeline-client.ts` posts base64 to the new pipeline endpoint. `handleBackgroundUpload` in `app/page.tsx` reuses the same progress-poll + result-render path as the brief flow.
+- Tile pyramid still uses `high_res=true` when the source is ≥ 12288 wide (equirect path only — Gemini outputs ~6336 wide, so auto-stays 3-tier).
 
 ### Copilot chat — full pointer/touch event isolation
 - Copilot panel was portaled into PSV's own container and only stopped `mousedown` / `wheel` / `keydown`. PSV 5.x drives drag off pointer + touch events, so cursor moves inside the panel were rotating the sphere and dragging markers underneath.
