@@ -19,6 +19,7 @@ interface ViewData {
   image_url: string | null
   tile_stem: string | null
   tile_base_url: string | null
+  high_res: boolean
   sphere_spec: any
   bg_prompt: string | null
   brand: string | null
@@ -61,6 +62,7 @@ export default function PublicSharePage({
         image_url: gen.image_url,
         tile_stem: (gen as any).tile_stem || null,
         tile_base_url: (gen as any).tile_base_url || null,
+        high_res: (gen as any).high_res === true,
         sphere_spec: gen.sphere_spec,
         bg_prompt: gen.bg_prompt,
         brand: (gen as any).brand || null,
@@ -103,6 +105,7 @@ export default function PublicSharePage({
             image_url: row.image_url,
             tile_stem: row.tile_stem,
             tile_base_url: row.tile_base_url,
+            high_res: (row as any).high_res === true,
             sphere_spec: null,
             bg_prompt: null,
             brand: row.brand,
@@ -182,6 +185,7 @@ export default function PublicSharePage({
                     imageUrl={viewData.image_url}
                     tileStem={viewData.tile_stem}
                     tileBaseUrl={viewData.tile_base_url}
+                    highRes={viewData.high_res}
                     markers={viewData.markers}
                     sphereId={id}
                     onMarkersChanged={async (updatedMarkers) => {
@@ -206,6 +210,7 @@ export default function PublicSharePage({
                     imageUrl={viewData.image_url}
                     tileStem={viewData.tile_stem}
                     tileBaseUrl={viewData.tile_base_url}
+                    highRes={viewData.high_res}
                   />
                 )}
                 {/* Delete button — invisible until hover, hidden in fullscreen */}

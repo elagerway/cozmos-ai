@@ -257,6 +257,16 @@ export function CopilotPanel({ sphereId, actions, onClose, mountHost }: Props) {
     <div
       className="absolute top-0 right-0 h-full w-[400px] z-[95] flex flex-col bg-neutral-950/95 backdrop-blur-xl border-l border-white/10 shadow-2xl"
       onMouseDown={(e) => e.stopPropagation()}
+      onMouseMove={(e) => e.stopPropagation()}
+      onMouseUp={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onPointerMove={(e) => e.stopPropagation()}
+      onPointerUp={(e) => e.stopPropagation()}
+      onTouchStart={(e) => e.stopPropagation()}
+      onTouchMove={(e) => e.stopPropagation()}
+      onTouchEnd={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
     >

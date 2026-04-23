@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-04-23
+
+### Copilot chat — full pointer/touch event isolation
+- Copilot panel was portaled into PSV's own container and only stopped `mousedown` / `wheel` / `keydown`. PSV 5.x drives drag off pointer + touch events, so cursor moves inside the panel were rotating the sphere and dragging markers underneath.
+- Panel root now stops propagation on the full set: `mouse*`, `pointer*`, `touch*`, `click`, `contextMenu`, `wheel`, `keyDown`. Drag-inside-panel no longer leaks to the viewer.
+
+### Optional 4-tier "high_res" tile pyramid (16K)
+- Re-added the 4th (16K) tile tier to both viewers, opt-in per sphere via a new `high_res` boolean column on `generations`. Default false preserves current 3-tier behaviour; existing spheres continue to render on 2K / 4K / 8K with no 404s.
+- `SphereViewer` + `InteractiveSphereViewer` accept `highRes?: boolean`, pick `LEVELS_HIGH_RES` (adds `{ width: 16384, cols: 16, rows: 8 }`) when true.
+- `app/g/[id]/page.tsx` reads `high_res` from the generation row and forwards it to whichever viewer renders.
+- Schema migration `add_high_res_to_generations`: `alter table public.generations add column if not exists high_res boolean not null default false;`. Non-destructive — existing rows backfill to false.
+- Rationale: infrastructure for future user-uploaded 16K+ VR captures and for GPT Image 2 when its API opens. Today's AI-generated sources (Gemini 4K) don't carry enough genuine detail to justify the 4th tier on their own.
+
+### Deploy env parity fix (Vercel production)
+- `ANTHROPIC_API_KEY`, `SUPABASE_SERVICE_KEY`, and `ADMIN_PASSWORD` were missing from Vercel production — server routes (`/api/copilot/chat`, admin auth, admin costs) returned 500s. Added all three to production + development (preview blocked by a CLI quirk in v50.37.0 and was skipped). Triggered production redeploy.
+
 ## 2026-04-22
 
 ### Marker redesign — flat glass panels (fbd1c20)

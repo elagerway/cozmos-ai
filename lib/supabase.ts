@@ -23,6 +23,7 @@ export interface GenerationRow {
   image_count: number | null
   environment: string | null
   featured: boolean
+  high_res: boolean
   created_at: string
   updated_at: string
 }

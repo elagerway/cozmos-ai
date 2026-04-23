@@ -62,6 +62,7 @@ interface Props {
   imageUrl: string
   tileStem?: string | null
   tileBaseUrl?: string | null
+  highRes?: boolean
   markers?: MarkerDef[]
   onMarkersChanged?: (markers: MarkerDef[]) => void | Promise<void>
   // Sphere ID for event telemetry (patents GB '335 / US '706). When set,
@@ -74,11 +75,15 @@ interface Props {
 // With `high_res=false` (default, the Ultra HD checkbox off) the pipeline
 // skips the 16K tier; requesting those non-existent tiles from PSV shows
 // red warning triangles on zoom. Keep this in sync with pipeline/server.py
-// generate_tiles() — currently LEVELS[:3] for non-high_res.
-const LEVELS = [
+// generate_tiles() — 3 tiers for default, 4 tiers (adds 16K) when high_res.
+const LEVELS_STANDARD = [
   { width: 2048, cols: 2, rows: 1 },
   { width: 4096, cols: 4, rows: 2 },
   { width: 8192, cols: 8, rows: 4 },
+]
+const LEVELS_HIGH_RES = [
+  ...LEVELS_STANDARD,
+  { width: 16384, cols: 16, rows: 8 },
 ]
 
 // Escape helpers — marker HTML goes straight into PSV's innerHTML, so every
@@ -288,7 +293,7 @@ function BioLinksHTML(data: BioLinksMarkerData, width: number = 300): string {
   `
 }
 
-export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, markers = [], onMarkersChanged, sphereId }: Props) {
+export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highRes = false, markers = [], onMarkersChanged, sphereId }: Props) {
   const track = useEventTracker(sphereId ?? null)
   // Latest track fn kept in a ref so PSV listener closures always call the
   // current one even across re-renders (React re-creates track otherwise).
@@ -591,7 +596,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, marke
         adapter: EquirectangularTilesAdapter,
         panorama: {
           baseUrl: `${base}/base.jpg`,
-          levels: LEVELS,
+          levels: highRes ? LEVELS_HIGH_RES : LEVELS_STANDARD,
           tileUrl: (col: number, row: number, level: number) =>
             `${base}/${level}/${col}_${row}.jpg`,
         },

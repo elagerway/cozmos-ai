@@ -114,7 +114,7 @@ Scene analysis (Claude Vision → detect TVs/screens → marker positions)
   ↓
 Composite thumbnails onto environment (small frames in equatorial band)
   ↓
-Tile pyramid (2K→4K→8K, 42 tiles default; +16K tier if `high_res=true`, 170 tiles). Frontend `LEVELS` in the viewers must match pipeline output.
+Tile pyramid (2K→4K→8K, 42 tiles default; +16K tier if `high_res=true`, 170 tiles). Frontend `LEVELS` in the viewers must match pipeline output — `SphereViewer` + `InteractiveSphereViewer` both accept a `highRes` prop and select `LEVELS_HIGH_RES` (4 tiers) when true, `LEVELS_STANDARD` (3 tiers) otherwise. `app/g/[id]/page.tsx` reads the `high_res` column off the generation row and forwards the prop.
   ↓
 Upload to Supabase Storage + save generation record
   ↓
