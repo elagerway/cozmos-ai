@@ -497,9 +497,11 @@ export default function HomePage() {
           </span>{" "}
           biosphere in a few minutes
         </h1>
-        <p className="text-lg text-muted-foreground max-w-2xl mx-auto mb-10 leading-relaxed">
-          AI-generated biospheres are sharp at a glance and soft at deep zoom.
-          For true HD, upload your own equirectangular 360° photo below.
+        <p className="text-lg text-muted-foreground max-w-2xl mx-auto mb-4 leading-relaxed">
+          Create your scene — a view from a penalty box at a hockey rink, on stage at a concert, in the broadcast booth at a football game. This is the view your audience will see when they enter your sphere.
+        </p>
+        <p className="text-sm text-muted-foreground/70 max-w-2xl mx-auto mb-10 leading-relaxed">
+          AI-generated scenes are sharp at a glance and soft at deep zoom. For true HD, upload your own equirectangular 360° photo below.
         </p>
 
         {/* Generation form */}
