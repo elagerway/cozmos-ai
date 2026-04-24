@@ -498,7 +498,7 @@ export default function HomePage() {
           biosphere in a few minutes
         </h1>
         <p className="text-lg text-muted-foreground max-w-2xl mx-auto mb-4 leading-relaxed">
-          Create your scene — a view from a penalty box at a hockey rink, on stage at a concert, in the broadcast booth at a football game. This is the view your audience will see when they enter your sphere.
+          Create your scene: a view from a penalty box at a hockey rink. On stage at a concert. In the broadcast booth at a football game. This is the view that your users will see when they enter your sphere.
         </p>
         <p className="text-sm text-muted-foreground/70 max-w-2xl mx-auto mb-10 leading-relaxed">
           AI-generated scenes are sharp at a glance and soft at deep zoom. For true HD, upload your own equirectangular 360° photo below.
@@ -516,7 +516,7 @@ export default function HomePage() {
                   if (prompt.trim() && !generating) handleGenerate()
                 }
               }}
-              placeholder='Describe your bio — mention @handle or paste a social profile URL for style inspiration...'
+              placeholder='Create your scene: a view from a penalty box at a hockey rink. On stage at a concert. In the broadcast booth at a football game. This is the view that your users will see when they enter your sphere.'
               className="min-h-[120px] bg-white/5 border-white/10 text-foreground placeholder:text-muted-foreground resize-none text-base"
               disabled={generating}
             />
