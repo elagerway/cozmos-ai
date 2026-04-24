@@ -752,6 +752,16 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
           markersPlugin.addMarker(config as any)
           return config.id
         }
+        // Expose so deleteMarker can drop the visual marker in-place instead
+        // of leaving a stale "already exists" ghost that blocks subsequent
+        // addMarker calls in the same session.
+        ;(viewer as any).__biosphereRemoveMarker = (markerId: string) => {
+          try {
+            markersPlugin.removeMarker(markerId)
+          } catch {
+            // Marker may not exist in PSV's list — ignore.
+          }
+        }
 
         // Build new marker HTML at a given width, based on marker type
         const rebuildMarkerHTML = (markerId: string, data: any, width: number): string | null => {
@@ -1195,6 +1205,8 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
       const next = [...markersRef.current]
       next.splice(idx, 1)
       markersRef.current = next
+      const viewer: any = viewerRef.current
+      viewer?.__biosphereRemoveMarker?.(marker_id)
       if (onMarkersChanged) await onMarkersChanged(next)
     },
     async regenerateBackground(input) {
