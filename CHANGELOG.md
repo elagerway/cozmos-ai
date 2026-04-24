@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-04-24
+
+### Copilot: `add_social_profile_marker` — fetch a handle and drop a bio card
+- The copilot now recognises "my handle is @x on instagram" / "go find @y" / "add my TikTok @z" style requests and drops a `profile` marker at the current view with scraped name, bio, avatar, and follower count — no URL required.
+- New pipeline endpoint `POST /scrape-profile` dispatches by platform (`instagram|youtube|twitter|tiktok`) to the existing `profile_scraper.py` functions and returns a unified JSON shape. No tile generation side effects — pure data fetch.
+- New copilot tool `add_social_profile_marker({ handle, platform, yaw?, pitch? })`; system prompt updated to describe when to use it (and to ask for the missing half when the user provides only a handle OR only a platform).
+- `CopilotPanel.runTool` adds the client-side executor; calls `scrapeProfile()` then hands the result to `actions.addMarker({ type: "profile", ... })`.
+- `InteractiveSphereViewer.addMarker` gains a `profile` branch that maps the tool's content into the existing `ProfileMarkerData` shape (so the existing `ProfileCardHTML` renderer picks it up unchanged).
+- New client function `scrapeProfile()` in `lib/pipeline-client.ts` with a `ScrapedProfile` type.
+
 ## 2026-04-23
 
 ### Upload-a-photo second flow — frontend + pipeline

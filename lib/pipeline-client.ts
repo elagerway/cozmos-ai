@@ -61,6 +61,36 @@ export async function startUploadGeneration(
   return res.json()
 }
 
+export interface ScrapedProfile {
+  handle: string
+  platform: "instagram" | "youtube" | "twitter" | "tiktok"
+  name: string
+  bio: string
+  profile_image: string
+  followers?: number | string
+  channel_url?: string
+  twitter_handle?: string
+  instagram_handle?: string
+  instagram_followers?: number
+  tiktok_handle?: string
+}
+
+export async function scrapeProfile(input: {
+  handle: string
+  platform: ScrapedProfile["platform"]
+}): Promise<ScrapedProfile> {
+  const res = await fetch(`${PIPELINE_URL}/scrape-profile`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ handle: input.handle, platform: input.platform }),
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || `Profile lookup failed (${res.status})`)
+  }
+  return res.json()
+}
+
 export async function startBgUploadGeneration(input: {
   image: string
   prompt?: string

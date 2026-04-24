@@ -15,7 +15,7 @@ AI-powered interactive 360° biospheres for influencers. Users type a name or pr
 - **Runtime**: Python 3.12, Docker with Chromium (Playwright)
 - **Image Processing**: pyvips (16K compositing, tile pyramid generation)
 - **AI Upscaling**: fal.ai ESRGAN (4x GPU upscaling)
-- **360° Generation**: Blockade Labs Skybox AI (M3 Photoreal, 8K → 16K export)
+- **360° Generation**: Blockade Labs Skybox AI (M3 Photoreal, 8K → 16K export) — default AI path. Also: **Google Gemini 3 Pro Image** (`gemini-3-pro-image-preview`, Nano Banana Pro) used on the user-upload outpaint path when an uploaded photo is not already equirectangular.
 - **Scene Analysis**: Claude Vision API (detect TVs/screens for marker placement)
 - **Social Scraping**: YouTube (channel + video data), Instagram (instagrapi), Twitter/TikTok (meta tags), Playwright (screenshots)
 
@@ -76,7 +76,8 @@ All five types share a single flat-panel `CARD_STYLE` — semi-transparent near-
 | `POST /generate` | Start sphere from brand/@handle/URL/prompt |
 | `POST /generate-about-me` | Interactive About Me sphere for influencers |
 | `POST /generate-from-prompt` | Pure AI generation via Blockade Labs |
-| `POST /generate-from-uploads` | Generate a brand-new sphere from uploaded images |
+| `POST /generate-from-uploads` | Generate a brand-new sphere from uploaded images (multi-image composite onto AI environment) |
+| `POST /generate-from-bg-upload` | User-upload-any-photo → sphere background. Real 2:1 equirect used as-is (0 AI cost). Non-equirect (ratio outside 1.8–2.2) routed through **Gemini 3 Pro Image** outpaint (~$0.24/call). Tile pyramid sized to source — `high_res=true` when ≥ 12288 wide. |
 | `POST /upload-as-markers` | Upscale uploads + harmony-pack as `image` markers on an EXISTING sphere (preserves gen_id) |
 | `POST /reroll-background` | Regenerate only the background; markers preserved; versioned tile stem |
 | `POST /reroll-variants` | Generate N × 8K previews for the variant picker |

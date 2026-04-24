@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
+import { scrapeProfile } from "@/lib/pipeline-client"
 
 // Actions that the panel can perform via tool_use. The viewer passes
 // implementations down — the panel just calls them and forwards results.
@@ -111,6 +112,40 @@ export function CopilotPanel({ sphereId, actions, onClose, mountHost }: Props) {
               pitch: args.pitch !== undefined ? Number(args.pitch) : undefined,
             })
             return { result: JSON.stringify(res) }
+          }
+          case "add_social_profile_marker": {
+            const rawHandle = String(args.handle || "").trim().replace(/^@/, "")
+            const platform = String(args.platform || "").toLowerCase() as
+              | "instagram" | "youtube" | "twitter" | "tiktok"
+            if (!rawHandle) return { result: JSON.stringify({ error: "handle required" }), is_error: true }
+            if (!["instagram", "youtube", "twitter", "tiktok"].includes(platform)) {
+              return { result: JSON.stringify({ error: `unsupported platform: ${platform}` }), is_error: true }
+            }
+            const profile = await scrapeProfile({ handle: rawHandle, platform })
+            const content: Record<string, unknown> = {
+              name: profile.name || rawHandle,
+              handle: profile.handle || rawHandle,
+              bio: profile.bio || "",
+              profile_image: profile.profile_image || "",
+            }
+            if (profile.channel_url) content.channel_url = profile.channel_url
+            if (platform === "youtube") content.subscriber_count = String(profile.followers ?? "")
+            if (platform === "instagram") {
+              content.instagram_handle = profile.instagram_handle || rawHandle
+              content.instagram_followers = Number(profile.instagram_followers ?? profile.followers ?? 0)
+            }
+            if (platform === "twitter") content.twitter_handle = profile.twitter_handle || rawHandle
+            if (platform === "tiktok") {
+              content.tiktok_handle = profile.tiktok_handle || rawHandle
+              content.tiktok_followers = String(profile.followers ?? "")
+            }
+            const res = await actions.addMarker({
+              type: "profile",
+              content,
+              yaw: args.yaw !== undefined ? Number(args.yaw) : undefined,
+              pitch: args.pitch !== undefined ? Number(args.pitch) : undefined,
+            })
+            return { result: JSON.stringify({ ok: true, ...res, profile: { name: content.name, handle: content.handle, platform } }) }
           }
           case "move_marker":
             await actions.moveMarker({

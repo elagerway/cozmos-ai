@@ -1147,6 +1147,27 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
         if (input.type === "audio") {
           return { type: "audio", yaw: y, pitch: p, data: { url: c.url, title: c.title ?? "" }, scene_scale: 1 } as any
         }
+        if (input.type === "profile") {
+          return {
+            type: "profile",
+            yaw: y,
+            pitch: p,
+            data: {
+              name: c.name ?? c.handle ?? "",
+              handle: c.handle ?? "",
+              bio: c.bio ?? "",
+              profile_image: c.profile_image ?? "",
+              subscriber_count: c.subscriber_count ?? "",
+              twitter_handle: c.twitter_handle ?? "",
+              instagram_handle: c.instagram_handle ?? "",
+              instagram_followers: c.instagram_followers ?? 0,
+              tiktok_handle: c.tiktok_handle ?? "",
+              tiktok_followers: c.tiktok_followers ?? "",
+              channel_url: c.channel_url ?? "",
+            },
+            scene_scale: 1,
+          } as any
+        }
         return { type: "bio-links", yaw: y, pitch: p, data: { title: c.title ?? "Links", links: c.links ?? [] }, scene_scale: 1 } as any
       })
       return { id: "pending" }

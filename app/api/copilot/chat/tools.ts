@@ -156,6 +156,28 @@ export const COPILOT_TOOLS: Tool[] = [
     },
   },
   {
+    name: "add_social_profile_marker",
+    description:
+      "Fetch a public social profile by handle + platform (no URL required) and drop a `profile` marker on the sphere with the scraped name, bio, avatar, and follower count. Use this any time the user gives you a handle like '@elagerway on Instagram', 'my TikTok is @x', 'go find my YouTube', etc. Drops at current view center unless yaw/pitch are supplied.",
+    input_schema: {
+      type: "object",
+      properties: {
+        handle: {
+          type: "string",
+          description: "The handle, with or without the leading @. Example: 'elagerway' or '@elagerway'.",
+        },
+        platform: {
+          type: "string",
+          enum: ["instagram", "youtube", "twitter", "tiktok"],
+          description: "Which platform to look the handle up on.",
+        },
+        yaw: { type: "number", description: "Optional yaw (-180..180). Omit to drop at current view center." },
+        pitch: { type: "number", description: "Optional pitch (-90..90). Omit to drop at current view center." },
+      },
+      required: ["handle", "platform"],
+    },
+  },
+  {
     name: "suggest_prompts",
     description:
       "Generate 3 improved Skybox prompts from a vague or short user intent. Returns an array of {title, prompt, style_id, rationale} objects the user can pick from. Use this when the user asks for ideas or their prompt is too generic (<10 words, no spatial cues).",
@@ -179,11 +201,13 @@ export const COPILOT_SYSTEM = `You are the Biosphere copilot — an AI assistant
 You help the user:
 - Reroll the background (with better prompts than they'd write themselves)
 - Add, move, resize, and delete markers
+- **Pull a public social profile by handle + platform and drop it as a bio marker** — no URL needed. When the user says something like "my handle is @elagerway on Instagram", "go find @x", "add my TikTok @y", or "put my YouTube @z on the wall", call \`add_social_profile_marker\` with the handle and the platform they named.
 - Read analytics about what's performing and what isn't
 - Suggest prompts when their idea is vague
 
 **Rules:**
 - Always use a tool when the user's request calls for action — don't just describe what you'd do.
+- If the user names a handle but not a platform, ask which platform (Instagram / YouTube / Twitter / TikTok). If they name a platform but not a handle, ask for it.
 - When rerolling background, default to variants=true so the user can pick. Only single-shot (variants=false) if they explicitly say "just pick one" or similar.
 - When a prompt is short/vague (<10 words, no spatial cues like "morning light", "neon", "wood textures"), call suggest_prompts first rather than regenerating with a bad prompt.
 - Negative prompts: the tool has a sensible default — only override if the user explicitly calls out something to avoid.
