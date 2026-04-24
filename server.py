@@ -2187,6 +2187,107 @@ async def generate_from_bg_upload(body: dict):
     return {"id": gen_id}
 
 
+@app.post("/scrape-profile")
+async def scrape_profile(body: dict):
+    """Fetch public profile data for a single handle on a single platform.
+    No tile generation, no sphere side-effects — just scrape + return.
+
+    Used by the copilot's add_social_profile_marker tool so a user can say
+    "my handle is @x on instagram" and the copilot drops a profile marker
+    with the scraped name / bio / avatar / follower count.
+
+    Request:  { "handle": "elagerway", "platform": "instagram" }
+                platform ∈ {"instagram", "youtube", "twitter", "tiktok"}
+    Response: {
+        "handle": "elagerway",
+        "platform": "instagram",
+        "name": "...",
+        "bio": "...",
+        "profile_image": "https://...",
+        "followers": 1234,          # platform-native count when available
+        "channel_url": "",          # youtube only
+        "twitter_handle": "",
+        "instagram_handle": "",
+        "tiktok_handle": "",
+    }
+    """
+    handle = (body.get("handle") or "").strip().lstrip("@")
+    platform = (body.get("platform") or "").strip().lower()
+    if not handle:
+        return JSONResponse({"error": "handle required"}, status_code=400)
+    if platform not in {"instagram", "youtube", "twitter", "tiktok"}:
+        return JSONResponse(
+            {"error": f"platform must be one of instagram/youtube/twitter/tiktok, got '{platform}'"},
+            status_code=400,
+        )
+
+    from profile_scraper import (
+        scrape_instagram_profile,
+        scrape_youtube_channel,
+        scrape_twitter_profile,
+        scrape_tiktok_profile,
+    )
+
+    try:
+        if platform == "instagram":
+            data = await scrape_instagram_profile(handle)
+            if not data:
+                return JSONResponse({"error": f"Instagram lookup failed for @{handle}"}, status_code=404)
+            return {
+                "handle": data.handle,
+                "platform": platform,
+                "name": data.name,
+                "bio": data.bio,
+                "profile_image": data.profile_pic_url,
+                "followers": data.follower_count,
+                "instagram_handle": data.handle,
+                "instagram_followers": data.follower_count,
+            }
+        if platform == "youtube":
+            data = await scrape_youtube_channel(handle)
+            if not data:
+                return JSONResponse({"error": f"YouTube lookup failed for @{handle}"}, status_code=404)
+            return {
+                "handle": data.handle or handle,
+                "platform": platform,
+                "name": data.channel_name,
+                "bio": data.description,
+                "profile_image": data.profile_pic_url,
+                "followers": data.subscriber_count,
+                "channel_url": data.channel_url,
+            }
+        if platform == "twitter":
+            data = await scrape_twitter_profile(handle)
+            if not data:
+                return JSONResponse({"error": f"Twitter lookup failed for @{handle}"}, status_code=404)
+            return {
+                "handle": data.handle,
+                "platform": platform,
+                "name": data.name,
+                "bio": data.bio,
+                "profile_image": data.profile_pic_url,
+                "followers": data.follower_count,
+                "twitter_handle": data.handle,
+            }
+        # tiktok
+        data = await scrape_tiktok_profile(handle)
+        if not data:
+            return JSONResponse({"error": f"TikTok lookup failed for @{handle}"}, status_code=404)
+        return {
+            "handle": data.handle,
+            "platform": platform,
+            "name": data.name,
+            "bio": data.bio,
+            "profile_image": data.profile_pic_url,
+            "followers": data.follower_count,
+            "tiktok_handle": data.handle,
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": f"scrape failed: {e}"}, status_code=500)
+
+
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 
