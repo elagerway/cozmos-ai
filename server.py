@@ -2288,6 +2288,80 @@ async def scrape_profile(body: dict):
         return JSONResponse({"error": f"scrape failed: {e}"}, status_code=500)
 
 
+@app.post("/scrape-linktree")
+async def scrape_linktree(body: dict):
+    """Scrape a public Linktree page and return its link list.
+
+    Powers the bio-links marker's "Import from Linktree" affordance so users
+    can paste linktr.ee/handle and have all titles + URLs pulled in at once.
+
+    Request:  { "url": "linktr.ee/handle" | "https://linktr.ee/handle" | "handle" }
+    Response: {
+        "username": "handle",
+        "profile_image": "https://...",
+        "page_title": "Display Name",
+        "links": [{ "title": "...", "url": "https://..." }, ...]   # empty/header rows filtered
+    }
+    """
+    raw = (body.get("url") or "").strip()
+    if not raw:
+        return JSONResponse({"error": "url required"}, status_code=400)
+
+    # Accept "linktr.ee/x", "https://linktr.ee/x", "@x", or bare "x"
+    handle = raw
+    for prefix in ("https://", "http://", "linktree.com/", "linktr.ee/", "www.linktr.ee/", "www.linktree.com/", "@"):
+        if handle.startswith(prefix):
+            handle = handle[len(prefix):]
+    handle = handle.split("/")[0].split("?")[0].strip()
+    if not handle:
+        return JSONResponse({"error": "could not parse handle from url"}, status_code=400)
+
+    import re
+    import json as json_mod
+    import httpx
+
+    page_url = f"https://linktr.ee/{handle}"
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
+            r = await client.get(
+                page_url,
+                headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"},
+            )
+        if r.status_code != 200:
+            return JSONResponse({"error": f"Linktree returned HTTP {r.status_code} for @{handle}"}, status_code=404)
+    except Exception as e:
+        return JSONResponse({"error": f"Linktree fetch failed: {e}"}, status_code=502)
+
+    m = re.search(r'<script[^>]+id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.S)
+    if not m:
+        return JSONResponse({"error": "Linktree page format unrecognised (no __NEXT_DATA__)"}, status_code=500)
+    try:
+        data = json_mod.loads(m.group(1))
+    except Exception:
+        return JSONResponse({"error": "Linktree __NEXT_DATA__ JSON parse failed"}, status_code=500)
+
+    pp = (data.get("props") or {}).get("pageProps") or {}
+    raw_links = pp.get("links") or []
+    cleaned = []
+    for item in raw_links:
+        if not isinstance(item, dict):
+            continue
+        # HEADER rows (and similar dividers) have no URL — skip
+        url = (item.get("url") or "").strip()
+        title = (item.get("title") or "").strip()
+        if not url:
+            continue
+        cleaned.append({"title": title or url, "url": url})
+
+    acc = pp.get("account") or {}
+    return {
+        "username": pp.get("username") or acc.get("username") or handle,
+        "profile_image": acc.get("profilePictureUrl") or "",
+        "page_title": pp.get("pageTitle") or acc.get("pageTitle") or "",
+        "links": cleaned,
+    }
+
+
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 

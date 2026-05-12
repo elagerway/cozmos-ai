@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { scrapeLinktree } from "@/lib/pipeline-client"
 
 type MarkerDef = {
   type: "video" | "image" | "audio" | "bio-links" | "profile"
@@ -83,6 +84,47 @@ export function AddMarkerModal({ onClose, onAdd }: Props) {
   // Bio links
   const [linksTitle, setLinksTitle] = useState("Links")
   const [links, setLinks] = useState<BioLink[]>([{ emoji: "🔗", title: "", url: "" }])
+  const [linktreeUrl, setLinktreeUrl] = useState("")
+  const [linktreeImporting, setLinktreeImporting] = useState(false)
+  const [linktreeError, setLinktreeError] = useState<string | null>(null)
+  // Index of the row whose URL field just became a linktr.ee/linktree.com URL —
+  // we offer an inline "Import all?" prompt instead of just letting that one
+  // link go through unchanged. null = no prompt active.
+  const [autoDetectRow, setAutoDetectRow] = useState<number | null>(null)
+
+  function isLinktreeUrl(s: string): boolean {
+    return /(?:^|\/\/)(?:www\.)?linktr\.ee\//i.test(s) || /(?:^|\/\/)(?:www\.)?linktree\.com\//i.test(s)
+  }
+
+  function mergeImported(existing: BioLink[], fetched: Array<{ title: string; url: string }>): BioLink[] {
+    const kept = existing.filter((l) => l.title.trim() || l.url.trim())
+    const appended = fetched.map((l) => ({ emoji: "🔗", title: l.title, url: l.url }))
+    const merged = [...kept, ...appended]
+    return merged.length ? merged : [{ emoji: "🔗", title: "", url: "" }]
+  }
+
+  async function runLinktreeImport(url: string) {
+    setLinktreeError(null)
+    setLinktreeImporting(true)
+    try {
+      const data = await scrapeLinktree({ url })
+      if (!data.links?.length) {
+        setLinktreeError("No links found on that Linktree")
+        return
+      }
+      setLinks((prev) => mergeImported(prev, data.links))
+      // If the user hadn't customised the card title yet, swap to the Linktree's display name.
+      if (linksTitle === "Links" && (data.page_title || data.username)) {
+        setLinksTitle(data.page_title || data.username)
+      }
+      setLinktreeUrl("")
+      setAutoDetectRow(null)
+    } catch (e: any) {
+      setLinktreeError(e?.message || "Import failed")
+    } finally {
+      setLinktreeImporting(false)
+    }
+  }
 
   async function handleAdd() {
     setError(null)
@@ -225,35 +267,94 @@ export function AddMarkerModal({ onClose, onAdd }: Props) {
 
           {tab === "bio-links" && (
             <>
-              <label style={labelStyle}>Card title</label>
+              <label style={labelStyle}>Import from Linktree</label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6 }}>
+                <input
+                  style={inputStyle}
+                  value={linktreeUrl}
+                  placeholder="linktr.ee/yourhandle"
+                  onChange={(e) => setLinktreeUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && linktreeUrl.trim() && !linktreeImporting) {
+                      e.preventDefault()
+                      runLinktreeImport(linktreeUrl.trim())
+                    }
+                  }}
+                />
+                <button
+                  onClick={() => runLinktreeImport(linktreeUrl.trim())}
+                  disabled={!linktreeUrl.trim() || linktreeImporting}
+                  style={{
+                    padding: "8px 14px", fontSize: 12, borderRadius: 6,
+                    background: linktreeImporting ? "rgba(59,130,246,0.4)" : "rgba(59,130,246,0.8)",
+                    border: "1px solid rgba(59,130,246,0.5)", color: "white",
+                    cursor: !linktreeUrl.trim() || linktreeImporting ? "default" : "pointer",
+                    opacity: !linktreeUrl.trim() ? 0.5 : 1,
+                  }}
+                >{linktreeImporting ? "Importing…" : "Import"}</button>
+              </div>
+              {linktreeError && <p style={{ ...hintStyle, color: "#ff6b6b" }}>{linktreeError}</p>}
+
+              <label style={{ ...labelStyle, marginTop: 8 }}>Card title</label>
               <input style={inputStyle} value={linksTitle} onChange={(e) => setLinksTitle(e.target.value)} placeholder="Links" />
               <label style={{ ...labelStyle, marginTop: 4 }}>Links</label>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {links.map((l, i) => (
-                  <div key={i} style={{ display: "grid", gridTemplateColumns: "48px 1fr 1fr 28px", gap: 6 }}>
-                    <input
-                      style={{ ...inputStyle, textAlign: "center", fontSize: 16 }}
-                      value={l.emoji}
-                      maxLength={4}
-                      onChange={(e) => setLinks((prev) => prev.map((x, j) => (j === i ? { ...x, emoji: e.target.value } : x)))}
-                    />
-                    <input
-                      style={inputStyle}
-                      value={l.title}
-                      placeholder="Title"
-                      onChange={(e) => setLinks((prev) => prev.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))}
-                    />
-                    <input
-                      style={inputStyle}
-                      value={l.url}
-                      placeholder="https://…"
-                      onChange={(e) => setLinks((prev) => prev.map((x, j) => (j === i ? { ...x, url: e.target.value } : x)))}
-                    />
-                    <button
-                      onClick={() => setLinks((prev) => prev.filter((_, j) => j !== i))}
-                      disabled={links.length === 1}
-                      style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "rgba(255,255,255,0.5)", cursor: links.length === 1 ? "default" : "pointer" }}
-                    >×</button>
+                  <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "48px 1fr 1fr 28px", gap: 6 }}>
+                      <input
+                        style={{ ...inputStyle, textAlign: "center", fontSize: 16 }}
+                        value={l.emoji}
+                        maxLength={4}
+                        onChange={(e) => setLinks((prev) => prev.map((x, j) => (j === i ? { ...x, emoji: e.target.value } : x)))}
+                      />
+                      <input
+                        style={inputStyle}
+                        value={l.title}
+                        placeholder="Title"
+                        onChange={(e) => setLinks((prev) => prev.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))}
+                      />
+                      <input
+                        style={inputStyle}
+                        value={l.url}
+                        placeholder="https://…"
+                        onChange={(e) => {
+                          const next = e.target.value
+                          setLinks((prev) => prev.map((x, j) => (j === i ? { ...x, url: next } : x)))
+                          if (isLinktreeUrl(next)) setAutoDetectRow(i)
+                          else if (autoDetectRow === i) setAutoDetectRow(null)
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          setLinks((prev) => prev.filter((_, j) => j !== i))
+                          if (autoDetectRow === i) setAutoDetectRow(null)
+                        }}
+                        disabled={links.length === 1}
+                        style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "rgba(255,255,255,0.5)", cursor: links.length === 1 ? "default" : "pointer" }}
+                      >×</button>
+                    </div>
+                    {autoDetectRow === i && (
+                      <div style={{
+                        marginLeft: 54, padding: "6px 10px", borderRadius: 6,
+                        background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.3)",
+                        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+                        fontSize: 12, color: "rgba(191,219,254,1)",
+                      }}>
+                        <span>Detected Linktree — import all links?</span>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button
+                            onClick={() => setAutoDetectRow(null)}
+                            style={{ padding: "4px 8px", fontSize: 11, borderRadius: 4, background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.7)", cursor: "pointer" }}
+                          >No</button>
+                          <button
+                            onClick={() => runLinktreeImport(l.url)}
+                            disabled={linktreeImporting}
+                            style={{ padding: "4px 8px", fontSize: 11, borderRadius: 4, background: "rgba(59,130,246,0.8)", border: "1px solid rgba(59,130,246,0.5)", color: "white", cursor: linktreeImporting ? "default" : "pointer" }}
+                          >{linktreeImporting ? "Importing…" : "Import"}</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
                 <button

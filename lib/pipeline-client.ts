@@ -91,6 +91,26 @@ export async function scrapeProfile(input: {
   return res.json()
 }
 
+export interface ScrapedLinktree {
+  username: string
+  profile_image: string
+  page_title: string
+  links: Array<{ title: string; url: string }>
+}
+
+export async function scrapeLinktree(input: { url: string }): Promise<ScrapedLinktree> {
+  const res = await fetch(`${PIPELINE_URL}/scrape-linktree`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: input.url }),
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || `Linktree lookup failed (${res.status})`)
+  }
+  return res.json()
+}
+
 export async function startBgUploadGeneration(input: {
   image: string
   prompt?: string
