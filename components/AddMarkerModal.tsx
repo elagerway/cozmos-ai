@@ -97,7 +97,10 @@ export function AddMarkerModal({ onClose, onAdd }: Props) {
   }
 
   function mergeImported(existing: BioLink[], fetched: Array<{ title: string; url: string }>): BioLink[] {
-    const kept = existing.filter((l) => l.title.trim() || l.url.trim())
+    // Drop empty rows AND any row whose URL is itself a Linktree link — that's almost
+    // certainly the row the user pasted into to trigger auto-detect, and keeping it next to
+    // the freshly-imported children would just be a redundant top-level placeholder.
+    const kept = existing.filter((l) => (l.title.trim() || l.url.trim()) && !isLinktreeUrl(l.url))
     const appended = fetched.map((l) => ({ emoji: "🔗", title: l.title, url: l.url }))
     const merged = [...kept, ...appended]
     return merged.length ? merged : [{ emoji: "🔗", title: "", url: "" }]

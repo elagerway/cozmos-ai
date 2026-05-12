@@ -2346,9 +2346,12 @@ async def scrape_linktree(body: dict):
     for item in raw_links:
         if not isinstance(item, dict):
             continue
-        # HEADER rows (and similar dividers) have no URL — skip
-        url = (item.get("url") or "").strip()
-        title = (item.get("title") or "").strip()
+        # HEADER rows (and similar dividers) have no URL — skip. Coerce defensively because
+        # Linktree's schema isn't a contract: non-string values would crash .strip().
+        url_raw = item.get("url")
+        title_raw = item.get("title")
+        url = url_raw.strip() if isinstance(url_raw, str) else ""
+        title = title_raw.strip() if isinstance(title_raw, str) else ""
         if not url:
             continue
         cleaned.append({"title": title or url, "url": url})

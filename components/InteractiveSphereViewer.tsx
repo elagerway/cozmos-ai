@@ -347,11 +347,33 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
   useEffect(() => {
     try {
       const raw = localStorage.getItem("biosphere.editDock.pos")
+      // f5b1f1f wrote a different key — drop it so it doesn't confuse future migrations
+      localStorage.removeItem("biosphere.editDock.side")
       if (!raw) return
       const v = JSON.parse(raw)
       if (typeof v?.x === "number" && typeof v?.y === "number") setDockPos({ x: v.x, y: v.y })
     } catch {}
   }, [])
+
+  // Reclamp persisted position on mount and on viewport resize. Without this, a position saved
+  // at a wide window can land entirely outside a narrower host on the next visit, with no
+  // grab-handle reachable.
+  useEffect(() => {
+    if (!psvHost) return
+    function reclamp() {
+      if (!dockRef.current || !psvHost || !dockPos) return
+      const dockRect = dockRef.current.getBoundingClientRect()
+      const hostRect = psvHost.getBoundingClientRect()
+      const maxX = Math.max(0, hostRect.width - dockRect.width)
+      const maxY = Math.max(0, hostRect.height - dockRect.height)
+      const x = Math.min(maxX, Math.max(0, dockPos.x))
+      const y = Math.min(maxY, Math.max(0, dockPos.y))
+      if (x !== dockPos.x || y !== dockPos.y) persistDockPos({ x, y })
+    }
+    reclamp()
+    window.addEventListener("resize", reclamp)
+    return () => window.removeEventListener("resize", reclamp)
+  }, [psvHost, dockPos])
 
   function persistDockPos(pos: { x: number; y: number }) {
     setDockPos(pos)
@@ -373,31 +395,42 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
       panelH: dockRect.height,
     }
     setDragDelta({ x: 0, y: 0 })
-    const onMove = (ev: PointerEvent) => {
+    let onMove: (ev: PointerEvent) => void
+    let onUp: (ev: PointerEvent) => void
+    let onCancel: (ev: PointerEvent) => void
+    const cleanup = () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+      window.removeEventListener("pointercancel", onCancel)
+      dragStartRef.current = null
+      setDragDelta(null)
+    }
+    onMove = (ev: PointerEvent) => {
       if (!dragStartRef.current) return
       setDragDelta({ x: ev.clientX - dragStartRef.current.pointerX, y: ev.clientY - dragStartRef.current.pointerY })
     }
-    const onUp = (ev: PointerEvent) => {
-      window.removeEventListener("pointermove", onMove)
-      window.removeEventListener("pointerup", onUp)
+    onUp = (ev: PointerEvent) => {
       const start = dragStartRef.current
       const host = psvHost
       if (start && host) {
         const hostRect2 = host.getBoundingClientRect()
         const dx = ev.clientX - start.pointerX
         const dy = ev.clientY - start.pointerY
-        // Clamp so the panel stays fully inside the sphere viewport.
         const maxX = Math.max(0, hostRect2.width - start.panelW)
         const maxY = Math.max(0, hostRect2.height - start.panelH)
         const x = Math.min(maxX, Math.max(0, start.initX + dx))
         const y = Math.min(maxY, Math.max(0, start.initY + dy))
         persistDockPos({ x, y })
       }
-      dragStartRef.current = null
-      setDragDelta(null)
+      cleanup()
     }
+    // pointercancel fires when the browser hijacks the gesture (touch scroll-prevention,
+    // devtools steal, alt-tab). Without this, the move/up listeners leak and the panel stays
+    // visually mid-drag until refresh.
+    onCancel = () => { cleanup() }
     window.addEventListener("pointermove", onMove)
     window.addEventListener("pointerup", onUp)
+    window.addEventListener("pointercancel", onCancel)
   }
 
   // Keep the latest markers prop reachable from refs-only closures (onMarkersChanged commit).
@@ -1357,7 +1390,6 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
             boxShadow: "0 8px 24px rgba(0, 0, 0, 0.4)",
             transition: dragDelta ? "none" : "transform 0.22s cubic-bezier(0.25, 1, 0.5, 1)",
             userSelect: "none",
-            touchAction: "none",
           }
           // Drag handle — pill across the top of the panel
           const handleStyle: React.CSSProperties = {
@@ -1391,7 +1423,13 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
 
           return (
             <div ref={dockRef} style={dockStyle}>
-              <div style={handleStyle} onPointerDown={startDockDrag} title="Drag to reposition">
+              <div
+                role="button"
+                aria-label="Drag to reposition the edit controls"
+                style={handleStyle}
+                onPointerDown={startDockDrag}
+                title="Drag to reposition"
+              >
                 <div style={handlePillStyle} />
               </div>
               <button
@@ -1424,6 +1462,78 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
               >
                 <span style={iconStyle}>{editMode ? "✓" : "✎"}</span>
                 <span>{editMode ? "Done" : "Edit Layout"}</span>
+              </button>
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => setComfortOpen((v) => !v)}
+                  title="Comfort settings — anti-distortion + motion-reduced mode"
+                  style={{ ...tileBase, ...(motionReduced ? tileActive("rgba(34,197,94,0.55)") : {}), width: "100%" }}
+                >
+                  <span style={iconStyle}>👁</span>
+                  <span>Comfort{motionReduced ? " · On" : ""}</span>
+                </button>
+                {comfortOpen && (
+                  <div
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onWheel={(e) => e.stopPropagation()}
+                    style={{
+                      position: "absolute", top: 0, left: "calc(100% + 8px)", width: 280,
+                      padding: 12, borderRadius: 12,
+                      background: "rgba(10,10,10,0.95)", backdropFilter: "blur(12px)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      color: "white", fontSize: 12, lineHeight: 1.5,
+                      boxShadow: "0 12px 30px rgba(0,0,0,0.6)",
+                      zIndex: 100,
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, marginBottom: 6 }}>Comfort</div>
+                    <div style={{ color: "rgba(255,255,255,0.5)", marginBottom: 10, fontSize: 11 }}>
+                      Reduces perspective distortion + motion sickness. Pitch damping, horizon nudge, FOV bounds, and barrel correction are always on.
+                    </div>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={motionReduced}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                          setMotionReduced(next)
+                          try {
+                            window.localStorage.setItem("biosphere_motion_reduced", next ? "1" : "0")
+                          } catch { /* ignore */ }
+                          if (viewerRef.current) {
+                            try {
+                              (viewerRef.current as any).__biosphereRigCleanup?.()
+                              const rig = attachAntiDistortionRig(viewerRef.current as any, { motionReduced: next })
+                              ;(viewerRef.current as any).__biosphereRigCleanup = rig
+                            } catch {}
+                          }
+                        }}
+                      />
+                      <span>Motion-reduced mode (caps velocity, disables momentum)</span>
+                    </label>
+                    <div style={{ marginTop: 10, fontSize: 10, color: "rgba(255,255,255,0.35)" }}>
+                      Honors your OS &ldquo;Reduce motion&rdquo; preference automatically.
+                    </div>
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => {
+                  const next = !lock360
+                  setLock360(next)
+                  lock360Ref.current = next
+                  if (next && viewerRef.current) {
+                    const pos = viewerRef.current.getPosition()
+                    if (Math.abs(pos.pitch) > Math.PI / 6) {
+                      viewerRef.current.animate({ yaw: pos.yaw, pitch: 0, speed: "3rpm" })
+                    }
+                  }
+                }}
+                title="Lock vertical look (off = free 360°)"
+                style={{ ...tileBase, ...(lock360 ? {} : tileActive("rgba(59,130,246,0.55)")) }}
+              >
+                <span style={iconStyle}>{lock360 ? "🔒" : "🌐"}</span>
+                <span>{lock360 ? "360° Off" : "360° On"}</span>
               </button>
               {editMode && (
                 <>
@@ -1538,97 +1648,6 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
           onClose={() => setExcludeOpen(false)}
           onApply={applyCategoryExclusion}
         />,
-        psvHost
-      )}
-      {/* 360 toggle — lock/unlock vertical look */}
-      {!loading && psvHost && createPortal(
-        <div
-          style={{ position: "absolute", top: 12, right: 12, zIndex: 90, display: "flex", alignItems: "flex-start", gap: 8 }}
-        >
-          <div style={{ position: "relative" }}>
-            <button
-              onClick={() => setComfortOpen((v) => !v)}
-              title="Comfort settings — anti-distortion + motion-reduced mode"
-              style={{
-                padding: "6px 12px", fontSize: 12, borderRadius: 8,
-                backdropFilter: "blur(8px)", cursor: "pointer", transition: "all 0.2s",
-                border: motionReduced ? "1px solid rgba(34,197,94,0.5)" : "1px solid rgba(255,255,255,0.1)",
-                background: motionReduced ? "rgba(34,197,94,0.8)" : "rgba(0,0,0,0.4)",
-                color: motionReduced ? "white" : "rgba(255,255,255,0.5)",
-              }}
-            >
-              👁 Comfort{motionReduced ? " Enabled" : ""}
-            </button>
-            {comfortOpen && (
-              <div
-                onMouseDown={(e) => e.stopPropagation()}
-                onWheel={(e) => e.stopPropagation()}
-                style={{
-                  position: "absolute", top: "calc(100% + 6px)", right: 0, width: 280,
-                  padding: 12, borderRadius: 12,
-                  background: "rgba(10,10,10,0.95)", backdropFilter: "blur(12px)",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  color: "white", fontSize: 12, lineHeight: 1.5,
-                  boxShadow: "0 12px 30px rgba(0,0,0,0.6)",
-                }}
-              >
-                <div style={{ fontWeight: 600, marginBottom: 6 }}>Comfort</div>
-                <div style={{ color: "rgba(255,255,255,0.5)", marginBottom: 10, fontSize: 11 }}>
-                  Reduces perspective distortion + motion sickness. Pitch damping, horizon nudge, FOV bounds, and barrel correction are always on.
-                </div>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={motionReduced}
-                    onChange={(e) => {
-                      const next = e.target.checked
-                      setMotionReduced(next)
-                      try {
-                        window.localStorage.setItem("biosphere_motion_reduced", next ? "1" : "0")
-                      } catch { /* ignore */ }
-                      // Rig reads this at attach time; reload is cleanest way to re-attach.
-                      // Alt: we could re-run attach; for now just remount by forcing a reload-ish flag.
-                      if (viewerRef.current) {
-                        try {
-                          (viewerRef.current as any).__biosphereRigCleanup?.()
-                          const rig = attachAntiDistortionRig(viewerRef.current as any, { motionReduced: next })
-                          ;(viewerRef.current as any).__biosphereRigCleanup = rig
-                        } catch {}
-                      }
-                    }}
-                  />
-                  <span>Motion-reduced mode (caps velocity, disables momentum)</span>
-                </label>
-                <div style={{ marginTop: 10, fontSize: 10, color: "rgba(255,255,255,0.35)" }}>
-                  Honors your OS &ldquo;Reduce motion&rdquo; preference automatically.
-                </div>
-              </div>
-            )}
-          </div>
-          <button
-            onClick={() => {
-              const next = !lock360
-              setLock360(next)
-              lock360Ref.current = next
-              // If locking, snap back to equator
-              if (next && viewerRef.current) {
-                const pos = viewerRef.current.getPosition()
-                if (Math.abs(pos.pitch) > Math.PI / 6) {
-                  viewerRef.current.animate({ yaw: pos.yaw, pitch: 0, speed: "3rpm" })
-                }
-              }
-            }}
-            style={{
-              padding: "6px 12px", fontSize: 12, borderRadius: 8,
-              backdropFilter: "blur(8px)", cursor: "pointer", transition: "all 0.2s",
-              border: lock360 ? "1px solid rgba(255,255,255,0.1)" : "1px solid rgba(59,130,246,0.5)",
-              background: lock360 ? "rgba(0,0,0,0.4)" : "rgba(59,130,246,0.8)",
-              color: lock360 ? "rgba(255,255,255,0.5)" : "white",
-            }}
-          >
-            {lock360 ? "360° Off" : "360° On"}
-          </button>
-        </div>,
         psvHost
       )}
     </div>
