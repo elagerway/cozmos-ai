@@ -335,28 +335,43 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
   const [heatmapOn, setHeatmapOn] = useState(false)
   const [eventStats, setEventStats] = useState<Record<string, { selects: number; dwell_ms: number; dwell_rank: number; select_rank: number }>>({})
 
-  // Edit-mode dock — translucent floating panel, default left edge, draggable to any side.
-  type DockSide = "left" | "right" | "top" | "bottom"
-  const [dockSide, setDockSide] = useState<DockSide>("left")
+  // Edit-mode dock — translucent floating panel, draggable to any spot inside the sphere.
+  // Position is stored as pixel offsets from the PSV host's top-left corner. `null` means
+  // "use the default visual position" (left edge, vertically centered) — kicks in for first-time
+  // users until they drag the panel.
+  const [dockPos, setDockPos] = useState<{ x: number; y: number } | null>(null)
   const [dragDelta, setDragDelta] = useState<{ x: number; y: number } | null>(null)
-  const dragStartRef = useRef<{ pointerX: number; pointerY: number } | null>(null)
+  const dragStartRef = useRef<{ pointerX: number; pointerY: number; initX: number; initY: number; panelW: number; panelH: number } | null>(null)
+  const dockRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     try {
-      const v = localStorage.getItem("biosphere.editDock.side")
-      if (v === "left" || v === "right" || v === "top" || v === "bottom") setDockSide(v)
+      const raw = localStorage.getItem("biosphere.editDock.pos")
+      if (!raw) return
+      const v = JSON.parse(raw)
+      if (typeof v?.x === "number" && typeof v?.y === "number") setDockPos({ x: v.x, y: v.y })
     } catch {}
   }, [])
 
-  function persistDockSide(side: DockSide) {
-    setDockSide(side)
-    try { localStorage.setItem("biosphere.editDock.side", side) } catch {}
+  function persistDockPos(pos: { x: number; y: number }) {
+    setDockPos(pos)
+    try { localStorage.setItem("biosphere.editDock.pos", JSON.stringify(pos)) } catch {}
   }
 
   function startDockDrag(e: React.PointerEvent) {
+    if (!dockRef.current || !psvHost) return
     e.preventDefault()
     e.stopPropagation()
-    dragStartRef.current = { pointerX: e.clientX, pointerY: e.clientY }
+    const dockRect = dockRef.current.getBoundingClientRect()
+    const hostRect = psvHost.getBoundingClientRect()
+    dragStartRef.current = {
+      pointerX: e.clientX,
+      pointerY: e.clientY,
+      initX: dockRect.left - hostRect.left,
+      initY: dockRect.top - hostRect.top,
+      panelW: dockRect.width,
+      panelH: dockRect.height,
+    }
     setDragDelta({ x: 0, y: 0 })
     const onMove = (ev: PointerEvent) => {
       if (!dragStartRef.current) return
@@ -365,20 +380,18 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
     const onUp = (ev: PointerEvent) => {
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
-      // Snap to nearest edge of the PSV host using the release point.
-      const host = psvHost || containerRef.current
-      if (host) {
-        const rect = host.getBoundingClientRect()
-        const x = ev.clientX - rect.left
-        const y = ev.clientY - rect.top
-        const dists: Array<[DockSide, number]> = [
-          ["left", x],
-          ["right", rect.width - x],
-          ["top", y],
-          ["bottom", rect.height - y],
-        ]
-        dists.sort((a, b) => a[1] - b[1])
-        persistDockSide(dists[0][0])
+      const start = dragStartRef.current
+      const host = psvHost
+      if (start && host) {
+        const hostRect2 = host.getBoundingClientRect()
+        const dx = ev.clientX - start.pointerX
+        const dy = ev.clientY - start.pointerY
+        // Clamp so the panel stays fully inside the sphere viewport.
+        const maxX = Math.max(0, hostRect2.width - start.panelW)
+        const maxY = Math.max(0, hostRect2.height - start.panelH)
+        const x = Math.min(maxX, Math.max(0, start.initX + dx))
+        const y = Math.min(maxY, Math.max(0, start.initY + dy))
+        persistDockPos({ x, y })
       }
       dragStartRef.current = null
       setDragDelta(null)
@@ -1310,19 +1323,30 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
           </div>
         </div>
       )}
-      {/* Edit mode dock — translucent floating panel, draggable to any edge. Portaled into PSV
-          container so it survives fullscreen. Default left edge; user pick persists in localStorage. */}
+      {/* Edit mode dock — translucent floating panel, freely positionable inside the sphere.
+          Default visual: left edge, vertically centered. Once the user drags it, the exact pixel
+          offset (top-left relative to PSV host) is stored and reused across sessions. */}
       {!loading && psvHost && createPortal(
         (() => {
-          const vertical = dockSide === "left" || dockSide === "right"
-          const basePos: React.CSSProperties =
-            dockSide === "left"   ? { left: 16, top: "50%", transform: `translateY(-50%) translate(${dragDelta?.x ?? 0}px, ${dragDelta?.y ?? 0}px)` } :
-            dockSide === "right"  ? { right: 16, top: "50%", transform: `translateY(-50%) translate(${dragDelta?.x ?? 0}px, ${dragDelta?.y ?? 0}px)` } :
-            dockSide === "top"    ? { top: 16, left: "50%", transform: `translateX(-50%) translate(${dragDelta?.x ?? 0}px, ${dragDelta?.y ?? 0}px)` } :
-                                    { bottom: 16, left: "50%", transform: `translateX(-50%) translate(${dragDelta?.x ?? 0}px, ${dragDelta?.y ?? 0}px)` }
+          // Position styles: when dockPos is null, fall back to left-center default. When set,
+          // use absolute pixel coords. During an active drag, add the live pointer delta so the
+          // panel follows the cursor.
+          const basePos: React.CSSProperties = dockPos
+            ? {
+                left: dockPos.x,
+                top: dockPos.y,
+                transform: dragDelta ? `translate(${dragDelta.x}px, ${dragDelta.y}px)` : "none",
+              }
+            : {
+                left: 16,
+                top: "50%",
+                transform: dragDelta
+                  ? `translateY(-50%) translate(${dragDelta.x}px, ${dragDelta.y}px)`
+                  : "translateY(-50%)",
+              }
           const dockStyle: React.CSSProperties = {
             position: "absolute", zIndex: 90, ...basePos,
-            display: "flex", flexDirection: vertical ? "column" : "row",
+            display: "flex", flexDirection: "column",
             alignItems: "stretch",
             gap: 4, padding: 6,
             background: "rgba(20, 20, 20, 0.55)",
@@ -1333,18 +1357,19 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
             boxShadow: "0 8px 24px rgba(0, 0, 0, 0.4)",
             transition: dragDelta ? "none" : "transform 0.22s cubic-bezier(0.25, 1, 0.5, 1)",
             userSelect: "none",
+            touchAction: "none",
           }
-          // Drag handle — pill across the leading edge (top of vertical dock, left of horizontal dock)
+          // Drag handle — pill across the top of the panel
           const handleStyle: React.CSSProperties = {
-            ...(vertical
-              ? { width: "100%", height: 18, display: "flex", justifyContent: "center", alignItems: "center" }
-              : { height: "100%", width: 18, display: "flex", justifyContent: "center", alignItems: "center" }),
+            width: "100%", height: 18,
+            display: "flex", justifyContent: "center", alignItems: "center",
             cursor: dragDelta ? "grabbing" : "grab",
             flex: "0 0 auto",
+            touchAction: "none",
           }
-          const handlePillStyle: React.CSSProperties = vertical
-            ? { width: 32, height: 4, borderRadius: 2, background: "rgba(255, 255, 255, 0.25)" }
-            : { width: 4, height: 32, borderRadius: 2, background: "rgba(255, 255, 255, 0.25)" }
+          const handlePillStyle: React.CSSProperties = {
+            width: 32, height: 4, borderRadius: 2, background: "rgba(255, 255, 255, 0.25)",
+          }
           // Button: shared glass tile, color accent via border + icon. Always icon + label.
           const tileBase: React.CSSProperties = {
             display: "flex", alignItems: "center", gap: 8,
@@ -1355,7 +1380,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
             color: "rgba(255, 255, 255, 0.92)",
             textAlign: "left",
             whiteSpace: "nowrap",
-            justifyContent: vertical ? "flex-start" : "center",
+            justifyContent: "flex-start",
           }
           const tileActive = (accent: string): React.CSSProperties => ({
             background: "rgba(255, 255, 255, 0.1)",
@@ -1365,8 +1390,8 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
           const iconStyle: React.CSSProperties = { fontSize: 14, lineHeight: 1, width: 18, textAlign: "center", flex: "0 0 auto" }
 
           return (
-            <div style={dockStyle}>
-              <div style={handleStyle} onPointerDown={startDockDrag} title="Drag to a different side">
+            <div ref={dockRef} style={dockStyle}>
+              <div style={handleStyle} onPointerDown={startDockDrag} title="Drag to reposition">
                 <div style={handlePillStyle} />
               </div>
               <button
