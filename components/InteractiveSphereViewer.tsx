@@ -1117,7 +1117,9 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageUrl, tileStem, tileBaseUrl, ready])
 
-  // Cmd/Ctrl+K toggles the copilot panel while in edit mode.
+  // Cmd/Ctrl+K toggles the copilot panel while in edit mode. Delete/Backspace deletes the
+  // currently selected marker (also in edit mode), skipping input/textarea focus so typing
+  // inside a marker form isn't hijacked.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -1125,11 +1127,24 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
           e.preventDefault()
           setCopilotOpen((v) => !v)
         }
+        return
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && editMode && selectedMarkerRef.current) {
+        const tgt = e.target as HTMLElement | null
+        const tag = tgt?.tagName
+        if (tag === "INPUT" || tag === "TEXTAREA" || tgt?.isContentEditable) return
+        e.preventDefault()
+        const id = selectedMarkerRef.current
+        selectedMarkerRef.current = null
+        setSelectedMarker(null)
+        copilotActions.deleteMarker({ marker_id: id })
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [editMode])
+    // onMarkersChanged is the only unstable thing copilotActions.deleteMarker closes over —
+    // rebind when the parent passes a new arrow so the persist call uses the latest version.
+  }, [editMode, onMarkersChanged])
 
   // Shared repack-after-exclusion handler used by the Categories modal AND the
   // copilot's exclude_categories tool. Filters markers by the excluded sets,
@@ -1559,6 +1574,21 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
                     <span style={iconStyle}>💾</span>
                     <span>{saving ? "Saving…" : "Save"}</span>
                   </button>
+                  {selectedMarker && (
+                    <button
+                      onClick={() => {
+                        const id = selectedMarker
+                        selectedMarkerRef.current = null
+                        setSelectedMarker(null)
+                        copilotActions.deleteMarker({ marker_id: id })
+                      }}
+                      title="Delete the selected marker (or press Delete / Backspace)"
+                      style={{ ...tileBase, ...tileActive("rgba(239,68,68,0.55)") }}
+                    >
+                      <span style={iconStyle}>🗑</span>
+                      <span>Delete</span>
+                    </button>
+                  )}
                   <button onClick={() => setAddOpen(true)} style={tileBase}>
                     <span style={iconStyle}>＋</span>
                     <span>Add</span>
