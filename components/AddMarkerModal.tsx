@@ -17,6 +17,9 @@ type TabKey = "image" | "video" | "audio" | "bio-links"
 interface Props {
   onClose: () => void
   onAdd: (builder: (yawDeg: number, pitchDeg: number) => MarkerDef) => void | Promise<void>
+  // Bulk-place markers with explicit positions. Used by the Linktree import to scatter each
+  // link as its own marker around the current view instead of cramming them into a single card.
+  onAddMany?: (markers: MarkerDef[]) => void | Promise<void>
 }
 
 function parseVideoUrl(url: string): { platform: "youtube" | "vimeo"; id: string } | null {
@@ -42,7 +45,7 @@ async function fetchVideoMeta(url: string, platform: "youtube" | "vimeo"): Promi
   }
 }
 
-export function AddMarkerModal({ onClose, onAdd }: Props) {
+export function AddMarkerModal({ onClose, onAdd, onAddMany }: Props) {
   const backdropRef = useRef<HTMLDivElement>(null)
   const [tab, setTab] = useState<TabKey>("image")
   const [submitting, setSubmitting] = useState(false)
@@ -87,23 +90,14 @@ export function AddMarkerModal({ onClose, onAdd }: Props) {
   const [linktreeUrl, setLinktreeUrl] = useState("")
   const [linktreeImporting, setLinktreeImporting] = useState(false)
   const [linktreeError, setLinktreeError] = useState<string | null>(null)
-  // Index of the row whose URL field just became a linktr.ee/linktree.com URL —
-  // we offer an inline "Import all?" prompt instead of just letting that one
-  // link go through unchanged. null = no prompt active.
-  const [autoDetectRow, setAutoDetectRow] = useState<number | null>(null)
 
-  function isLinktreeUrl(s: string): boolean {
-    return /(?:^|\/\/)(?:www\.)?linktr\.ee\//i.test(s) || /(?:^|\/\/)(?:www\.)?linktree\.com\//i.test(s)
-  }
-
-  function mergeImported(existing: BioLink[], fetched: Array<{ title: string; url: string }>): BioLink[] {
-    // Drop empty rows AND any row whose URL is itself a Linktree link — that's almost
-    // certainly the row the user pasted into to trigger auto-detect, and keeping it next to
-    // the freshly-imported children would just be a redundant top-level placeholder.
-    const kept = existing.filter((l) => (l.title.trim() || l.url.trim()) && !isLinktreeUrl(l.url))
-    const appended = fetched.map((l) => ({ emoji: "🔗", title: l.title, url: l.url }))
-    const merged = [...kept, ...appended]
-    return merged.length ? merged : [{ emoji: "🔗", title: "", url: "" }]
+  // Scatter N markers in a yaw arc around the user's view. Returns yaw offsets in degrees,
+  // centered on 0, max spread ±60° (≈ FOV-friendly). Empty fan when N <= 1 → all at center.
+  function yawFan(n: number): number[] {
+    if (n <= 1) return [0]
+    const spread = Math.min(120, n * 14) // total degrees
+    const step = spread / (n - 1)
+    return Array.from({ length: n }, (_, i) => -spread / 2 + i * step)
   }
 
   async function runLinktreeImport(url: string) {
@@ -115,13 +109,26 @@ export function AddMarkerModal({ onClose, onAdd }: Props) {
         setLinktreeError("No links found on that Linktree")
         return
       }
-      setLinks((prev) => mergeImported(prev, data.links))
-      // If the user hadn't customised the card title yet, swap to the Linktree's display name.
-      if (linksTitle === "Links" && (data.page_title || data.username)) {
-        setLinksTitle(data.page_title || data.username)
+      if (!onAddMany) {
+        setLinktreeError("Bulk-add not supported in this context")
+        return
       }
-      setLinktreeUrl("")
-      setAutoDetectRow(null)
+      const offsets = yawFan(data.links.length)
+      // Each Linktree link becomes its own bio-links marker (single-row card). The yaw/pitch
+      // here are placeholders — the parent stamps real values on top of the user's current
+      // view yaw/pitch. (Pitch offset is small per-row alternation so they don't all sit on a
+      // single horizon line.)
+      const markers: MarkerDef[] = data.links.map((l, i) => ({
+        type: "bio-links",
+        yaw: offsets[i],
+        pitch: ((i % 2) ? -6 : 6),
+        data: {
+          title: l.title || "Link",
+          links: [{ emoji: "🔗", title: l.title || l.url, url: l.url }],
+        },
+      }))
+      await onAddMany(markers)
+      onClose()
     } catch (e: any) {
       setLinktreeError(e?.message || "Import failed")
     } finally {
@@ -294,8 +301,9 @@ export function AddMarkerModal({ onClose, onAdd }: Props) {
                     cursor: !linktreeUrl.trim() || linktreeImporting ? "default" : "pointer",
                     opacity: !linktreeUrl.trim() ? 0.5 : 1,
                   }}
-                >{linktreeImporting ? "Importing…" : "Import"}</button>
+                >{linktreeImporting ? "Importing…" : "Spread"}</button>
               </div>
+              <p style={hintStyle}>Each Linktree link becomes its own marker, fanned around the current view.</p>
               {linktreeError && <p style={{ ...hintStyle, color: "#ff6b6b" }}>{linktreeError}</p>}
 
               <label style={{ ...labelStyle, marginTop: 8 }}>Card title</label>
@@ -321,43 +329,14 @@ export function AddMarkerModal({ onClose, onAdd }: Props) {
                         style={inputStyle}
                         value={l.url}
                         placeholder="https://…"
-                        onChange={(e) => {
-                          const next = e.target.value
-                          setLinks((prev) => prev.map((x, j) => (j === i ? { ...x, url: next } : x)))
-                          if (isLinktreeUrl(next)) setAutoDetectRow(i)
-                          else if (autoDetectRow === i) setAutoDetectRow(null)
-                        }}
+                        onChange={(e) => setLinks((prev) => prev.map((x, j) => (j === i ? { ...x, url: e.target.value } : x)))}
                       />
                       <button
-                        onClick={() => {
-                          setLinks((prev) => prev.filter((_, j) => j !== i))
-                          if (autoDetectRow === i) setAutoDetectRow(null)
-                        }}
+                        onClick={() => setLinks((prev) => prev.filter((_, j) => j !== i))}
                         disabled={links.length === 1}
                         style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "rgba(255,255,255,0.5)", cursor: links.length === 1 ? "default" : "pointer" }}
                       >×</button>
                     </div>
-                    {autoDetectRow === i && (
-                      <div style={{
-                        marginLeft: 54, padding: "6px 10px", borderRadius: 6,
-                        background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.3)",
-                        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
-                        fontSize: 12, color: "rgba(191,219,254,1)",
-                      }}>
-                        <span>Detected Linktree — import all links?</span>
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <button
-                            onClick={() => setAutoDetectRow(null)}
-                            style={{ padding: "4px 8px", fontSize: 11, borderRadius: 4, background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.7)", cursor: "pointer" }}
-                          >No</button>
-                          <button
-                            onClick={() => runLinktreeImport(l.url)}
-                            disabled={linktreeImporting}
-                            style={{ padding: "4px 8px", fontSize: 11, borderRadius: 4, background: "rgba(59,130,246,0.8)", border: "1px solid rgba(59,130,246,0.5)", color: "white", cursor: linktreeImporting ? "default" : "pointer" }}
-                          >{linktreeImporting ? "Importing…" : "Import"}</button>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 ))}
                 <button

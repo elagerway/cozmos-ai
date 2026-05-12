@@ -1609,6 +1609,25 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
             await addMarkerAtCurrentView(builder)
             setAddOpen(false)
           }}
+          onAddMany={async (markers) => {
+            // Each marker carries a relative yaw/pitch offset (degrees) — stamp the user's
+            // current view onto them so the fan lands centered on what they're looking at.
+            const viewer: any = viewerRef.current
+            if (!viewer) return
+            const pos = viewer.getPosition()
+            const viewYawDeg = (pos.yaw * 180) / Math.PI
+            const viewPitchDeg = (pos.pitch * 180) / Math.PI
+            const stamped: MarkerDef[] = markers.map((m) => ({
+              ...m,
+              yaw: viewYawDeg + m.yaw,
+              pitch: viewPitchDeg + m.pitch,
+            }))
+            for (const m of stamped) viewer.__biosphereAddMarker?.(m)
+            const updated = [...markersRef.current, ...stamped]
+            markersRef.current = updated
+            if (onMarkersChanged) await onMarkersChanged(updated)
+            setAddOpen(false)
+          }}
         />,
         psvHost
       )}
