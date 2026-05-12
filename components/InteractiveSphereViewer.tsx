@@ -1258,7 +1258,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
         </div>
       )}
       {/* Edit mode controls — portaled into PSV container so they show in fullscreen too */}
-      {!loading && markers.length > 0 && psvHost && createPortal(
+      {!loading && psvHost && createPortal(
         <div
           style={{ position: "absolute", top: 12, left: 12, zIndex: 90, display: "flex", alignItems: "center", gap: 8 }}
         >

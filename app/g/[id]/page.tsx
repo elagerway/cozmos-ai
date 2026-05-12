@@ -3,7 +3,6 @@
 import { use, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { SphereViewer } from "@/components/SphereViewer"
 import { InteractiveSphereViewer } from "@/components/InteractiveSphereViewer"
 import { SphereSpecViewer } from "@/components/SphereSpecViewer"
 import { ImageUploader } from "@/components/ImageUploader"
@@ -180,39 +179,30 @@ export default function PublicSharePage({
           <>
             {viewData.image_url && (
               <div className="relative group">
-                {viewData.markers && viewData.markers.length > 0 ? (
-                  <InteractiveSphereViewer
-                    imageUrl={viewData.image_url}
-                    tileStem={viewData.tile_stem}
-                    tileBaseUrl={viewData.tile_base_url}
-                    highRes={viewData.high_res}
-                    markers={viewData.markers}
-                    sphereId={id}
-                    onMarkersChanged={async (updatedMarkers) => {
-                      // Save updated positions to Supabase. Persist the raw
-                      // brand as profile.name — NOT viewData.title, which is
-                      // already decorated ("<brand> — Generated Sphere") and
-                      // would re-append the suffix on every reload.
-                      if (supabase) {
-                        const envData = { markers: updatedMarkers, profile: viewData.brand ? { name: viewData.brand } : undefined }
-                        const { error } = await supabase
-                          .from("generations")
-                          .update({ environment: JSON.stringify(envData) })
-                          .eq("id", id)
-                        if (error) console.error("Failed to save markers:", error)
-                        else console.log("Markers saved to Supabase")
-                      }
-                      setViewData({ ...viewData, markers: updatedMarkers })
-                    }}
-                  />
-                ) : (
-                  <SphereViewer
-                    imageUrl={viewData.image_url}
-                    tileStem={viewData.tile_stem}
-                    tileBaseUrl={viewData.tile_base_url}
-                    highRes={viewData.high_res}
-                  />
-                )}
+                <InteractiveSphereViewer
+                  imageUrl={viewData.image_url}
+                  tileStem={viewData.tile_stem}
+                  tileBaseUrl={viewData.tile_base_url}
+                  highRes={viewData.high_res}
+                  markers={viewData.markers ?? []}
+                  sphereId={id}
+                  onMarkersChanged={async (updatedMarkers) => {
+                    // Save updated positions to Supabase. Persist the raw
+                    // brand as profile.name — NOT viewData.title, which is
+                    // already decorated ("<brand> — Generated Sphere") and
+                    // would re-append the suffix on every reload.
+                    if (supabase) {
+                      const envData = { markers: updatedMarkers, profile: viewData.brand ? { name: viewData.brand } : undefined }
+                      const { error } = await supabase
+                        .from("generations")
+                        .update({ environment: JSON.stringify(envData) })
+                        .eq("id", id)
+                      if (error) console.error("Failed to save markers:", error)
+                      else console.log("Markers saved to Supabase")
+                    }
+                    setViewData({ ...viewData, markers: updatedMarkers })
+                  }}
+                />
                 {/* Delete button — invisible until hover, hidden in fullscreen */}
                 {!isFullscreen && (
                   <button
