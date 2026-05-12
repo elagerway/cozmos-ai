@@ -79,6 +79,7 @@ All five types share a single flat-panel `CARD_STYLE` — semi-transparent near-
 | `POST /generate-from-uploads` | Generate a brand-new sphere from uploaded images (multi-image composite onto AI environment) |
 | `POST /generate-from-bg-upload` | User-upload-any-photo → sphere background. Real 2:1 equirect used as-is (0 AI cost). Non-equirect (ratio outside 1.8–2.2) routed through **Gemini 3 Pro Image** outpaint (~$0.24/call). Tile pyramid sized to source — `high_res=true` when ≥ 12288 wide. |
 | `POST /upload-as-markers` | Upscale uploads + harmony-pack as `image` markers on an EXISTING sphere (preserves gen_id) |
+| `POST /scrape-profile` | Single-handle profile lookup. Body `{ handle, platform: "instagram"|"youtube"|"twitter"|"tiktok" }` → unified JSON `{ name, bio, profile_image, followers, ... }`. Used by the copilot's `add_social_profile_marker` tool. |
 | `POST /reroll-background` | Regenerate only the background; markers preserved; versioned tile stem |
 | `POST /reroll-variants` | Generate N × 8K previews for the variant picker |
 | `GET /reroll-variants/{id}` | Poll variant-job state |

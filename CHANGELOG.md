@@ -1,6 +1,18 @@
 # Changelog
 
+## 2026-05-12
+
+### Fix: sphere controls render on empty-marker spheres
+- The whole edit toolbar (Edit Layout, + Add, 🎨 Reroll BG, 🚫 Categories, ✨ Copilot, 🔥 Heatmap) was gated on `markers.length > 0` in two places — `app/g/[id]/page.tsx:183` (fell back to the read-only `SphereViewer`) and `components/InteractiveSphereViewer.tsx:1261` (toolbar portal). Together that produced a chicken-and-egg: prompt-based scene-creation spheres come out of `/generate-from-prompt` with `environment: null`, and the user had no UI to add the first marker.
+- `InteractiveSphereViewer` is now rendered unconditionally with `markers={viewData.markers ?? []}`; the toolbar gate drops its `markers.length > 0` half. Bootstrap of the first marker happens via + Add or Cmd+K → Copilot.
+- Diagnosis lesson: "DB restart" was a red herring. Probe showed `created_at == updated_at` on every row and `sphere_events` empty — `environment` was never written, not wiped. Only `/generate-about-me` in `pipeline/server.py:1273` writes initial markers; the prompt and bg-upload flows do not.
+
 ## 2026-04-24
+
+### Hero + textarea reframed: "Create your scene"
+- Hero paragraph and the brief-textarea placeholder both now read: *"Create your scene: a view from a penalty box at a hockey rink. On stage at a concert. In the broadcast booth at a football game. This is the view that your users will see when they enter your sphere."*
+- The fidelity disclaimer about AI-generated softness moves to a smaller secondary line below the hero, still visible.
+- The live `detectSocialProfile()` indicator continues to work silently on the textarea regardless of placeholder copy — pasting `@handle` still surfaces the violet "detected" pill.
 
 ### Copilot: `add_social_profile_marker` — fetch a handle and drop a bio card
 - The copilot now recognises "my handle is @x on instagram" / "go find @y" / "add my TikTok @z" style requests and drops a `profile` marker at the current view with scraped name, bio, avatar, and follower count — no URL required.
@@ -9,6 +21,11 @@
 - `CopilotPanel.runTool` adds the client-side executor; calls `scrapeProfile()` then hands the result to `actions.addMarker({ type: "profile", ... })`.
 - `InteractiveSphereViewer.addMarker` gains a `profile` branch that maps the tool's content into the existing `ProfileMarkerData` shape (so the existing `ProfileCardHTML` renderer picks it up unchanged).
 - New client function `scrapeProfile()` in `lib/pipeline-client.ts` with a `ScrapedProfile` type.
+
+### Fix: deleteMarker now also removes the PSV visual marker
+- `deleteMarker` was updating React state (`markersRef`, `onMarkersChanged` PATCH) but never calling `markersPlugin.removeMarker()` — PSV's internal marker list still held the old marker. Any subsequent `addMarker` call in the same session (typical in a copilot "swap profile" flow) hit PSV's "marker already exists" guard and the new marker was rejected, **even though the tool reported success and the user thought the swap landed**.
+- New `__biosphereRemoveMarker` escape hatch on the viewer; `deleteMarker` now calls it before the persistence PATCH. Wraps the PSV call in try/catch so a genuinely-missing marker is a no-op rather than fatal.
+- Caught by actually exercising the swap flow in a real browser session — copilot's "delete then add" reported success, the database showed only the delete persisted. Lesson logged: type-check + curl-the-endpoint is not the same as testing. Browser-driven end-to-end is the bar.
 
 ## 2026-04-23
 
