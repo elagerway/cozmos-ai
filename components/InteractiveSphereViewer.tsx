@@ -334,6 +334,59 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
   // Heatmap + top-viewed overlays (patent GB '335 / US '706).
   const [heatmapOn, setHeatmapOn] = useState(false)
   const [eventStats, setEventStats] = useState<Record<string, { selects: number; dwell_ms: number; dwell_rank: number; select_rank: number }>>({})
+
+  // Edit-mode dock — translucent floating panel, default left edge, draggable to any side.
+  type DockSide = "left" | "right" | "top" | "bottom"
+  const [dockSide, setDockSide] = useState<DockSide>("left")
+  const [dragDelta, setDragDelta] = useState<{ x: number; y: number } | null>(null)
+  const dragStartRef = useRef<{ pointerX: number; pointerY: number } | null>(null)
+
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem("biosphere.editDock.side")
+      if (v === "left" || v === "right" || v === "top" || v === "bottom") setDockSide(v)
+    } catch {}
+  }, [])
+
+  function persistDockSide(side: DockSide) {
+    setDockSide(side)
+    try { localStorage.setItem("biosphere.editDock.side", side) } catch {}
+  }
+
+  function startDockDrag(e: React.PointerEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    dragStartRef.current = { pointerX: e.clientX, pointerY: e.clientY }
+    setDragDelta({ x: 0, y: 0 })
+    const onMove = (ev: PointerEvent) => {
+      if (!dragStartRef.current) return
+      setDragDelta({ x: ev.clientX - dragStartRef.current.pointerX, y: ev.clientY - dragStartRef.current.pointerY })
+    }
+    const onUp = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+      // Snap to nearest edge of the PSV host using the release point.
+      const host = psvHost || containerRef.current
+      if (host) {
+        const rect = host.getBoundingClientRect()
+        const x = ev.clientX - rect.left
+        const y = ev.clientY - rect.top
+        const dists: Array<[DockSide, number]> = [
+          ["left", x],
+          ["right", rect.width - x],
+          ["top", y],
+          ["bottom", rect.height - y],
+        ]
+        dists.sort((a, b) => a[1] - b[1])
+        persistDockSide(dists[0][0])
+      }
+      dragStartRef.current = null
+      setDragDelta(null)
+    }
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onUp)
+  }
+
   // Keep the latest markers prop reachable from refs-only closures (onMarkersChanged commit).
   const markersRef = useRef(markers)
   useEffect(() => { markersRef.current = markers }, [markers])
@@ -1257,149 +1310,155 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
           </div>
         </div>
       )}
-      {/* Edit mode controls — portaled into PSV container so they show in fullscreen too */}
+      {/* Edit mode dock — translucent floating panel, draggable to any edge. Portaled into PSV
+          container so it survives fullscreen. Default left edge; user pick persists in localStorage. */}
       {!loading && psvHost && createPortal(
-        <div
-          style={{ position: "absolute", top: 12, left: 12, zIndex: 90, display: "flex", alignItems: "center", gap: 8 }}
-        >
-          <button
-            onClick={() => {
-              const next = !editMode
-              setEditMode(next)
-              editModeRef.current = next
-              if (!next) {
-                selectedMarkerRef.current = null
-                setSelectedMarker(null)
-                commitMarkerChanges()
-              }
-              // Toggle edit-mode styling on all markers
-              const psvContainer = containerRef.current?.querySelector(".psv-container")
-              if (psvContainer) {
-                if (next) {
-                  psvContainer.classList.add("biosphere-edit-mode")
-                } else {
-                  psvContainer.classList.remove("biosphere-edit-mode")
-                  psvContainer.classList.remove("biosphere-dragging")
-                  const ghost = document.querySelector(".biosphere-ghost") as any
-                  if (ghost) { ghost.__cleanup?.(); ghost.remove() }
-                  document.querySelectorAll(".psv-marker.biosphere-selected").forEach((el) => {
-                    el.classList.remove("biosphere-selected")
-                  })
-                  document.querySelectorAll(".biosphere-handle").forEach((h) => h.remove())
-                }
-              }
-            }}
-            style={{
-              padding: "6px 12px", fontSize: 12, borderRadius: 8,
-              backdropFilter: "blur(8px)", transition: "all 0.2s", cursor: "pointer",
-              border: editMode ? "1px solid rgba(59,130,246,0.5)" : "1px solid rgba(255,255,255,0.1)",
-              background: editMode ? "rgba(59,130,246,0.8)" : "rgba(0,0,0,0.4)",
-              color: editMode ? "white" : "rgba(255,255,255,0.5)",
-            }}
-          >
-            {editMode ? "Done Editing" : "Edit Layout"}
-          </button>
-          {editMode && (
-            <button
-              onClick={async () => {
-                setSaving(true)
-                try {
-                  await commitMarkerChanges()
-                } finally {
-                  setSaving(false)
-                }
-              }}
-              disabled={saving}
-              style={{
-                padding: "6px 12px", fontSize: 12, borderRadius: 8,
-                backdropFilter: "blur(8px)", transition: "all 0.2s",
-                cursor: saving ? "default" : "pointer",
-                border: "1px solid rgba(34,197,94,0.5)",
-                background: saving ? "rgba(34,197,94,0.4)" : "rgba(34,197,94,0.8)",
-                color: "white",
-                opacity: saving ? 0.7 : 1,
-              }}
-            >
-              {saving ? "Saving…" : "Save"}
-            </button>
-          )}
-          {editMode && (
-            <>
+        (() => {
+          const vertical = dockSide === "left" || dockSide === "right"
+          const basePos: React.CSSProperties =
+            dockSide === "left"   ? { left: 16, top: "50%", transform: `translateY(-50%) translate(${dragDelta?.x ?? 0}px, ${dragDelta?.y ?? 0}px)` } :
+            dockSide === "right"  ? { right: 16, top: "50%", transform: `translateY(-50%) translate(${dragDelta?.x ?? 0}px, ${dragDelta?.y ?? 0}px)` } :
+            dockSide === "top"    ? { top: 16, left: "50%", transform: `translateX(-50%) translate(${dragDelta?.x ?? 0}px, ${dragDelta?.y ?? 0}px)` } :
+                                    { bottom: 16, left: "50%", transform: `translateX(-50%) translate(${dragDelta?.x ?? 0}px, ${dragDelta?.y ?? 0}px)` }
+          const dockStyle: React.CSSProperties = {
+            position: "absolute", zIndex: 90, ...basePos,
+            display: "flex", flexDirection: vertical ? "column" : "row",
+            alignItems: "stretch",
+            gap: 4, padding: 6,
+            background: "rgba(20, 20, 20, 0.55)",
+            backdropFilter: "blur(24px) saturate(180%)",
+            WebkitBackdropFilter: "blur(24px) saturate(180%)",
+            border: "1px solid rgba(255, 255, 255, 0.08)",
+            borderRadius: 16,
+            boxShadow: "0 8px 24px rgba(0, 0, 0, 0.4)",
+            transition: dragDelta ? "none" : "transform 0.22s cubic-bezier(0.25, 1, 0.5, 1)",
+            userSelect: "none",
+          }
+          // Drag handle — pill across the leading edge (top of vertical dock, left of horizontal dock)
+          const handleStyle: React.CSSProperties = {
+            ...(vertical
+              ? { width: "100%", height: 18, display: "flex", justifyContent: "center", alignItems: "center" }
+              : { height: "100%", width: 18, display: "flex", justifyContent: "center", alignItems: "center" }),
+            cursor: dragDelta ? "grabbing" : "grab",
+            flex: "0 0 auto",
+          }
+          const handlePillStyle: React.CSSProperties = vertical
+            ? { width: 32, height: 4, borderRadius: 2, background: "rgba(255, 255, 255, 0.25)" }
+            : { width: 4, height: 32, borderRadius: 2, background: "rgba(255, 255, 255, 0.25)" }
+          // Button: shared glass tile, color accent via border + icon. Always icon + label.
+          const tileBase: React.CSSProperties = {
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "8px 12px", fontSize: 12, fontWeight: 500,
+            borderRadius: 10, cursor: "pointer", transition: "background 0.15s, border-color 0.15s",
+            background: "rgba(255, 255, 255, 0.06)",
+            border: "1px solid rgba(255, 255, 255, 0.08)",
+            color: "rgba(255, 255, 255, 0.92)",
+            textAlign: "left",
+            whiteSpace: "nowrap",
+            justifyContent: vertical ? "flex-start" : "center",
+          }
+          const tileActive = (accent: string): React.CSSProperties => ({
+            background: "rgba(255, 255, 255, 0.1)",
+            border: `1px solid ${accent}`,
+            color: "white",
+          })
+          const iconStyle: React.CSSProperties = { fontSize: 14, lineHeight: 1, width: 18, textAlign: "center", flex: "0 0 auto" }
+
+          return (
+            <div style={dockStyle}>
+              <div style={handleStyle} onPointerDown={startDockDrag} title="Drag to a different side">
+                <div style={handlePillStyle} />
+              </div>
               <button
-                onClick={() => setAddOpen(true)}
-                style={{
-                  padding: "6px 12px", fontSize: 12, borderRadius: 8,
-                  backdropFilter: "blur(8px)", cursor: "pointer", transition: "all 0.2s",
-                  border: "1px solid rgba(255,255,255,0.15)",
-                  background: "rgba(0,0,0,0.45)",
-                  color: "white",
+                onClick={() => {
+                  const next = !editMode
+                  setEditMode(next)
+                  editModeRef.current = next
+                  if (!next) {
+                    selectedMarkerRef.current = null
+                    setSelectedMarker(null)
+                    commitMarkerChanges()
+                  }
+                  const psvContainer = containerRef.current?.querySelector(".psv-container")
+                  if (psvContainer) {
+                    if (next) {
+                      psvContainer.classList.add("biosphere-edit-mode")
+                    } else {
+                      psvContainer.classList.remove("biosphere-edit-mode")
+                      psvContainer.classList.remove("biosphere-dragging")
+                      const ghost = document.querySelector(".biosphere-ghost") as any
+                      if (ghost) { ghost.__cleanup?.(); ghost.remove() }
+                      document.querySelectorAll(".psv-marker.biosphere-selected").forEach((el) => {
+                        el.classList.remove("biosphere-selected")
+                      })
+                      document.querySelectorAll(".biosphere-handle").forEach((h) => h.remove())
+                    }
+                  }
                 }}
+                style={{ ...tileBase, ...(editMode ? tileActive("rgba(59,130,246,0.55)") : {}) }}
               >
-                + Add
+                <span style={iconStyle}>{editMode ? "✓" : "✎"}</span>
+                <span>{editMode ? "Done" : "Edit Layout"}</span>
               </button>
-              <button
-                onClick={() => setRerollOpen(true)}
-                title="Regenerate the sphere background with a new prompt"
-                style={{
-                  padding: "6px 12px", fontSize: 12, borderRadius: 8,
-                  backdropFilter: "blur(8px)", cursor: "pointer", transition: "all 0.2s",
-                  border: "1px solid rgba(168,85,247,0.5)",
-                  background: "rgba(168,85,247,0.8)",
-                  color: "white",
-                }}
-              >
-                🎨 Reroll BG
-              </button>
-              <button
-                onClick={() => setExcludeOpen(true)}
-                title="Exclude categories and re-pack markers (patent US '666)"
-                style={{
-                  padding: "6px 12px", fontSize: 12, borderRadius: 8,
-                  backdropFilter: "blur(8px)", cursor: "pointer", transition: "all 0.2s",
-                  border: "1px solid rgba(250,204,21,0.5)",
-                  background: "rgba(250,204,21,0.8)",
-                  color: "black",
-                }}
-              >
-                🚫 Categories
-              </button>
-              <button
-                onClick={() => setCopilotOpen((v) => !v)}
-                title="Toggle copilot chat (Cmd+K)"
-                style={{
-                  padding: "6px 12px", fontSize: 12, borderRadius: 8,
-                  backdropFilter: "blur(8px)", cursor: "pointer", transition: "all 0.2s",
-                  border: copilotOpen ? "1px solid rgba(59,130,246,0.6)" : "1px solid rgba(255,255,255,0.15)",
-                  background: copilotOpen ? "rgba(59,130,246,0.8)" : "rgba(0,0,0,0.45)",
-                  color: "white",
-                }}
-              >
-                ✨ Copilot
-              </button>
-              <button
-                onClick={() => setHeatmapOn((v) => !v)}
-                title={Object.keys(eventStats).length === 0 ? "No viewer events recorded yet" : "Toggle dwell-time heatmap"}
-                style={{
-                  padding: "6px 12px", fontSize: 12, borderRadius: 8,
-                  backdropFilter: "blur(8px)", cursor: "pointer", transition: "all 0.2s",
-                  border: heatmapOn ? "1px solid rgba(239,68,68,0.6)" : "1px solid rgba(255,255,255,0.15)",
-                  background: heatmapOn ? "rgba(239,68,68,0.8)" : "rgba(0,0,0,0.45)",
-                  color: "white",
-                }}
-              >
-                🔥 Heatmap {heatmapOn ? "On" : "Off"}
-              </button>
-              <span style={{
-                padding: "4px 8px", fontSize: 10, borderRadius: 6,
-                background: selectedMarker ? "rgba(59,130,246,0.2)" : "rgba(0,0,0,0.4)",
-                color: selectedMarker ? "rgba(147,197,253,1)" : "rgba(255,255,255,0.4)",
-                border: selectedMarker ? "1px solid rgba(59,130,246,0.3)" : "none",
-              }}>
-                {selectedMarker ? "Drag to move • corners to resize" : "Drag a marker to move it"}
-              </span>
-            </>
-          )}
-        </div>,
+              {editMode && (
+                <>
+                  <button
+                    onClick={async () => {
+                      setSaving(true)
+                      try { await commitMarkerChanges() } finally { setSaving(false) }
+                    }}
+                    disabled={saving}
+                    style={{
+                      ...tileBase,
+                      ...tileActive("rgba(34,197,94,0.5)"),
+                      opacity: saving ? 0.7 : 1,
+                      cursor: saving ? "default" : "pointer",
+                    }}
+                  >
+                    <span style={iconStyle}>💾</span>
+                    <span>{saving ? "Saving…" : "Save"}</span>
+                  </button>
+                  <button onClick={() => setAddOpen(true)} style={tileBase}>
+                    <span style={iconStyle}>＋</span>
+                    <span>Add</span>
+                  </button>
+                  <button
+                    onClick={() => setRerollOpen(true)}
+                    title="Regenerate the sphere background with a new prompt"
+                    style={tileBase}
+                  >
+                    <span style={iconStyle}>🎨</span>
+                    <span>Reroll BG</span>
+                  </button>
+                  <button
+                    onClick={() => setExcludeOpen(true)}
+                    title="Exclude categories and re-pack markers (patent US '666)"
+                    style={tileBase}
+                  >
+                    <span style={iconStyle}>🚫</span>
+                    <span>Categories</span>
+                  </button>
+                  <button
+                    onClick={() => setCopilotOpen((v) => !v)}
+                    title="Toggle copilot chat (Cmd+K)"
+                    style={{ ...tileBase, ...(copilotOpen ? tileActive("rgba(59,130,246,0.55)") : {}) }}
+                  >
+                    <span style={iconStyle}>✨</span>
+                    <span>Copilot</span>
+                  </button>
+                  <button
+                    onClick={() => setHeatmapOn((v) => !v)}
+                    title={Object.keys(eventStats).length === 0 ? "No viewer events recorded yet" : "Toggle dwell-time heatmap"}
+                    style={{ ...tileBase, ...(heatmapOn ? tileActive("rgba(239,68,68,0.55)") : {}) }}
+                  >
+                    <span style={iconStyle}>🔥</span>
+                    <span>Heatmap{heatmapOn ? " · On" : ""}</span>
+                  </button>
+                </>
+              )}
+            </div>
+          )
+        })(),
         psvHost
       )}
       {addOpen && psvHost && createPortal(
