@@ -1388,7 +1388,10 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
             border: "1px solid rgba(255, 255, 255, 0.08)",
             borderRadius: 16,
             boxShadow: "0 8px 24px rgba(0, 0, 0, 0.4)",
-            transition: dragDelta ? "none" : "transform 0.22s cubic-bezier(0.25, 1, 0.5, 1)",
+            // No transition: post-release the `transform` would interpolate from translate(dx, dy)
+            // back to none while `left/top` jumped instantly to the new dockPos, briefly snapping
+            // the panel through an intermediate position. Instant settle is correct here.
+            transition: "none",
             userSelect: "none",
           }
           // Drag handle — pill across the top of the panel
@@ -1403,7 +1406,10 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
             width: 32, height: 4, borderRadius: 2, background: "rgba(255, 255, 255, 0.25)",
           }
           // Button: shared glass tile, color accent via border + icon. Always icon + label.
+          // box-sizing: border-box so `width: 100%` (used by the Comfort wrapper button) doesn't
+          // blow past the column width by padding + border.
           const tileBase: React.CSSProperties = {
+            boxSizing: "border-box",
             display: "flex", alignItems: "center", gap: 8,
             padding: "8px 12px", fontSize: 12, fontWeight: 500,
             borderRadius: 10, cursor: "pointer", transition: "background 0.15s, border-color 0.15s",
