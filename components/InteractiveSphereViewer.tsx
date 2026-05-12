@@ -436,6 +436,10 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
   // Keep the latest markers prop reachable from refs-only closures (onMarkersChanged commit).
   const markersRef = useRef(markers)
   useEffect(() => { markersRef.current = markers }, [markers])
+  // Keep the latest onMarkersChanged reachable from long-lived closures (viewer init runs
+  // once per imageUrl change; the prop is a fresh arrow every parent render).
+  const onMarkersChangedRef = useRef(onMarkersChanged)
+  useEffect(() => { onMarkersChangedRef.current = onMarkersChanged }, [onMarkersChanged])
 
   // Toggle the heatmap class on psv-container whenever heatmapOn flips.
   useEffect(() => {
@@ -652,6 +656,32 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
         .biosphere-handle--tr { top: -7px; right: -7px; cursor: nesw-resize; }
         .biosphere-handle--bl { bottom: -7px; left: -7px; cursor: nesw-resize; }
         .biosphere-handle--br { bottom: -7px; right: -7px; cursor: nwse-resize; }
+
+        /* On-marker delete button — top center, clear of corner resize handles */
+        .biosphere-delete-btn {
+          position: absolute;
+          top: -14px;
+          left: 50%;
+          transform: translateX(-50%);
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          background: rgba(239, 68, 68, 0.95);
+          border: 2px solid white;
+          color: white;
+          font-size: 16px;
+          font-weight: 700;
+          line-height: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+          z-index: 1001;
+          pointer-events: auto;
+          user-select: none;
+        }
+        .biosphere-resizing .biosphere-delete-btn { display: none; }
         /* While actively resizing: drop the selection box and ghost so the marker reads clean */
         .biosphere-resizing .psv-marker.biosphere-selected {
           outline: none !important;
@@ -861,6 +891,29 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
             // Marker may not exist in PSV's list — ignore.
           }
         }
+        // Full delete: splice state, remove from PSV, persist via onMarkersChanged. Routed
+        // through a ref because viewer init runs once per imageUrl change but the prop
+        // arrow is fresh every parent render.
+        ;(viewer as any).__biosphereDeleteMarker = async (markerId: string) => {
+          const idx = markersRef.current.findIndex((m, i) => {
+            const id = m.type === "profile" ? "profile-card"
+              : m.type === "video" ? `video-${(m.data as any).video_id}`
+              : m.type === "audio" ? `audio-${i}-${encodeURIComponent((m.data as any).url || "").slice(0, 24)}`
+              : m.type === "bio-links" ? `bio-links-${i}`
+              : `image-${i}`
+            return id === markerId
+          })
+          if (idx < 0) return
+          const next = [...markersRef.current]
+          next.splice(idx, 1)
+          markersRef.current = next
+          try { markersPlugin.removeMarker(markerId) } catch {}
+          if (selectedMarkerRef.current === markerId) {
+            selectedMarkerRef.current = null
+            setSelectedMarker(null)
+          }
+          if (onMarkersChangedRef.current) await onMarkersChangedRef.current(next)
+        }
 
         // Build new marker HTML at a given width, based on marker type
         const rebuildMarkerHTML = (markerId: string, data: any, width: number): string | null => {
@@ -879,7 +932,23 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
         }
 
         const attachResizeHandles = (markerEl: HTMLElement, markerId: string, data: any) => {
-          markerEl.querySelectorAll(".biosphere-handle").forEach((h) => h.remove())
+          markerEl.querySelectorAll(".biosphere-handle, .biosphere-delete-btn").forEach((h) => h.remove())
+          // Delete button — top-center, off the marker, not on a corner so it can't be confused
+          // with a resize handle. Routes through the viewer's __biosphereDeleteMarker exposure.
+          const delBtn = document.createElement("div")
+          delBtn.className = "biosphere-delete-btn"
+          delBtn.textContent = "×"
+          delBtn.title = "Delete marker"
+          delBtn.addEventListener("mousedown", (ev) => {
+            ev.preventDefault()
+            ev.stopPropagation()
+          })
+          delBtn.addEventListener("click", (ev) => {
+            ev.preventDefault()
+            ev.stopPropagation()
+            ;(viewer as any).__biosphereDeleteMarker?.(markerId)
+          })
+          markerEl.appendChild(delBtn)
           const corners: Array<{ cls: string; sx: number; sy: number }> = [
             { cls: "biosphere-handle--tl", sx: -1, sy: -1 },
             { cls: "biosphere-handle--tr", sx: 1, sy: -1 },
@@ -938,7 +1007,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
         const selectForEdit = (markerEl: HTMLElement, markerId: string, data: any) => {
           document.querySelectorAll(".psv-marker.biosphere-selected").forEach((el) => {
             el.classList.remove("biosphere-selected")
-            el.querySelectorAll(".biosphere-handle").forEach((h) => h.remove())
+            el.querySelectorAll(".biosphere-handle, .biosphere-delete-btn").forEach((h) => h.remove())
           })
           markerEl.classList.add("biosphere-selected")
           attachResizeHandles(markerEl, markerId, data)
@@ -1134,17 +1203,14 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
         const tag = tgt?.tagName
         if (tag === "INPUT" || tag === "TEXTAREA" || tgt?.isContentEditable) return
         e.preventDefault()
-        const id = selectedMarkerRef.current
-        selectedMarkerRef.current = null
-        setSelectedMarker(null)
-        copilotActions.deleteMarker({ marker_id: id })
+        // Route through the viewer's __biosphereDeleteMarker (same path the on-marker × button
+        // uses) so PSV state, React markersRef, and the persist PATCH all stay in sync.
+        ;(viewerRef.current as any)?.__biosphereDeleteMarker?.(selectedMarkerRef.current)
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-    // onMarkersChanged is the only unstable thing copilotActions.deleteMarker closes over —
-    // rebind when the parent passes a new arrow so the persist call uses the latest version.
-  }, [editMode, onMarkersChanged])
+  }, [editMode])
 
   // Shared repack-after-exclusion handler used by the Categories modal AND the
   // copilot's exclude_categories tool. Filters markers by the excluded sets,
@@ -1475,7 +1541,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
                       document.querySelectorAll(".psv-marker.biosphere-selected").forEach((el) => {
                         el.classList.remove("biosphere-selected")
                       })
-                      document.querySelectorAll(".biosphere-handle").forEach((h) => h.remove())
+                      document.querySelectorAll(".biosphere-handle, .biosphere-delete-btn").forEach((h) => h.remove())
                     }
                   }
                 }}
@@ -1574,21 +1640,6 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
                     <span style={iconStyle}>💾</span>
                     <span>{saving ? "Saving…" : "Save"}</span>
                   </button>
-                  {selectedMarker && (
-                    <button
-                      onClick={() => {
-                        const id = selectedMarker
-                        selectedMarkerRef.current = null
-                        setSelectedMarker(null)
-                        copilotActions.deleteMarker({ marker_id: id })
-                      }}
-                      title="Delete the selected marker (or press Delete / Backspace)"
-                      style={{ ...tileBase, ...tileActive("rgba(239,68,68,0.55)") }}
-                    >
-                      <span style={iconStyle}>🗑</span>
-                      <span>Delete</span>
-                    </button>
-                  )}
                   <button onClick={() => setAddOpen(true)} style={tileBase}>
                     <span style={iconStyle}>＋</span>
                     <span>Add</span>
@@ -1652,10 +1703,15 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
               yaw: viewYawDeg + m.yaw,
               pitch: viewPitchDeg + m.pitch,
             }))
-            for (const m of stamped) viewer.__biosphereAddMarker?.(m)
-            const updated = [...markersRef.current, ...stamped]
-            markersRef.current = updated
-            if (onMarkersChanged) await onMarkersChanged(updated)
+            // Crucial: __biosphereAddMarker reads markersRef.current.length to assign each
+            // new ID (e.g. bio-links-{N}). Push to the ref one-by-one so each call sees a
+            // length that matches the next array index. Batching the push to the end made
+            // all N markers claim the same ID ("bio-links-0 already exists" on link 2+).
+            for (const m of stamped) {
+              viewer.__biosphereAddMarker?.(m)
+              markersRef.current = [...markersRef.current, m]
+            }
+            if (onMarkersChangedRef.current) await onMarkersChangedRef.current(markersRef.current)
             setAddOpen(false)
           }}
         />,
