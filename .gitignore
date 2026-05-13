@@ -49,3 +49,7 @@ __pycache__
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# agent + browser-test scratch (local only)
+.claude
+.playwright-mcp
