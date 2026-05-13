@@ -60,6 +60,13 @@ All five types share a single flat-panel `CARD_STYLE` — semi-transparent near-
 - `audio` — glass audio card with flat play icon + HTML5 `<audio>` player
 - `bio-links` — list of emoji + title + URL rows, clickable in view mode
 - Position in degrees (yaw/pitch), `scene_width` (designed HTML width), `scene_scale` (user-applied uniform scale multiplier)
+- **Stable `id` field on every marker.** PSV registers under that id and never reassigns. Lookups are direct `m.id === target` checks — splicing the array never invalidates anyone's id. `ensureMarkerIds(markers)` (exported from `InteractiveSphereViewer`) fills missing ids on page-load via `legacyMarkerId(m, i)` (the historical index-derived form, used only as backward-compat for rows that pre-date this). Anything created in-session gets `m-<timestamp>-<rand>` via `generateMarkerId()`. The id is persisted alongside the marker in `generations.environment` so it's stable across reloads.
+
+### Edit mode
+- `InteractiveSphereViewer` exposes a portaled "dock" while the user is in edit mode — frosted-glass tile rack docked anywhere inside the sphere viewport. Position is free-drag (pill handle at the top), clamped on release + on `window resize`, persisted in `localStorage["biosphere.editDock.pos"]` as `{ x, y }`.
+- Always-visible tiles: `Edit Layout` (toggles edit mode), `Comfort` (motion-reduced + anti-distortion rig), `360°` (lock/unlock vertical look).
+- Edit-mode-only tiles: `Save`, `+ Add`, `🎨 Reroll BG`, `🚫 Categories`, `✨ Copilot`, `🔥 Heatmap`.
+- Selected markers show a red `✕` at top-center plus four corner resize handles. ✕ + the Delete/Backspace shortcut both route through the viewer's `__biosphereDeleteMarker(id)` — the single canonical delete path also used by `copilotActions.deleteMarker`.
 
 ### Pipeline
 - `server.py` — FastAPI server, all endpoints, pipeline orchestration
@@ -80,6 +87,7 @@ All five types share a single flat-panel `CARD_STYLE` — semi-transparent near-
 | `POST /generate-from-bg-upload` | User-upload-any-photo → sphere background. Real 2:1 equirect used as-is (0 AI cost). Non-equirect (ratio outside 1.8–2.2) routed through **Gemini 3 Pro Image** outpaint (~$0.24/call). Tile pyramid sized to source — `high_res=true` when ≥ 12288 wide. |
 | `POST /upload-as-markers` | Upscale uploads + harmony-pack as `image` markers on an EXISTING sphere (preserves gen_id) |
 | `POST /scrape-profile` | Single-handle profile lookup. Body `{ handle, platform: "instagram"|"youtube"|"twitter"|"tiktok" }` → unified JSON `{ name, bio, profile_image, followers, ... }`. Used by the copilot's `add_social_profile_marker` tool. |
+| `POST /scrape-linktree` | Public Linktree page → `{ username, profile_image, page_title, links: [{title, url}] }`. Accepts `{ url }` as `linktr.ee/<handle>`, `https://linktr.ee/<handle>`, or bare handle. Parses `__NEXT_DATA__`, filters HEADER/divider rows. Used by AddMarkerModal's `Spread` button to scatter each link as its own bio-links marker around the user's current view. |
 | `POST /reroll-background` | Regenerate only the background; markers preserved; versioned tile stem |
 | `POST /reroll-variants` | Generate N × 8K previews for the variant picker |
 | `GET /reroll-variants/{id}` | Poll variant-job state |

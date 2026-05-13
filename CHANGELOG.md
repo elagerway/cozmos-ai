@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-05-13
+
+### Linktree import — each link becomes its own marker, fanned around the view
+- New pipeline endpoint `POST /scrape-linktree` fetches a public `linktr.ee/<handle>` page, parses `__NEXT_DATA__`, filters HEADER/divider rows (no url), and returns `{ username, profile_image, page_title, links[] }`. Defensive string coercion on `url`/`title` so a non-string field can't trip a 500. SSRF surface reviewed: hardcoded `https://linktr.ee/{handle}` after scheme + host strip + `split("/")[0]`, so attacker hosts collapse to a 404.
+- `lib/pipeline-client.ts` gains `scrapeLinktree({ url })` + `ScrapedLinktree` type.
+- Bio-links tab of `AddMarkerModal` has an `Import from Linktree` row at the top. The button label is `Spread` — submit creates one bio-links marker per link, scattered in a yaw fan (max ±60° spread, alternating ±6° pitch) around the user's current view, and closes the modal. The earlier "all-links-in-one-card" merge behaviour is gone — that was indistinguishable from Linktree itself.
+- Indexing bug fix: `__biosphereAddMarker` reads `markersRef.current.length` to assign a fresh id; the bulk path now pushes to `markersRef` *inside* the loop so each call sees the right length. Previously every Linktree link claimed the same id and only the first landed.
+
+### Edit-mode dock — floating translucent panel, free-positioning, persisted
+- The horizontal top-left toolbar is replaced with a "modern Apple" glass dock: rounded 16px, frosted blur, hairline border, soft shadow. Each control is a uniform glass tile with icon + label; active states (Edit on, Save, Copilot open, Heatmap on) get a tinted accent border in place of the previous bright per-button backgrounds.
+- Default position: left edge, vertically centered. Pill drag-handle at the top — grab and drop **anywhere inside the sphere viewport**. Position is clamped on release so it can't land offscreen, and reclamped on mount + on window resize so a position saved on a wide monitor doesn't strand the handle on a phone.
+- Position persists across sessions in `localStorage["biosphere.editDock.pos"]` as `{ x, y }`. Orphan `biosphere.editDock.side` key (from an earlier snap-to-edge attempt) is removed on next load.
+- `Comfort` (👁) and `360°` (🔒/🌐) toggles previously lived in their own top-right portal — both now join the dock as always-visible tiles below Edit Layout. Comfort popover flies out to the right of its tile so it works from any dock position.
+- Drag listeners bind `pointercancel` as well as `pointerup`, so a hijacked gesture (touch scroll-prevention, devtools steal, alt-tab on Chrome) doesn't leak handlers and freeze the panel mid-drag.
+
+### On-marker × delete + multi-delete fix via stable ids
+- Selected markers in edit mode now show a red `×` button at top-center (clear of the corner resize handles). Delete / Backspace keyboard also wired, skipped when focus is inside an input/textarea/contenteditable.
+- New viewer escape hatch `__biosphereDeleteMarker(id)` is the single canonical delete path — on-marker ×, keyboard shortcut, and copilot delete all route through it.
+- **Stable per-marker ids end the silent-failure-on-second-delete bug.** Every marker now carries an `id?: string`. `legacyMarkerId(m, i)` assigns the historical index-derived id only when augmenting rows that pre-date this change (so PSV mid-session doesn't lose them); `generateMarkerId()` returns `m-<timestamp>-<rand>` for everything created in-session. `ensureMarkerIds(markers)` is exported so `app/g/[id]/page.tsx` augments on load and uses `m.id` when normalising for `/upload-as-markers`. Every `findIndex` / lookup is now a direct `m.id === target` check — splicing the array no longer invalidates anyone's id. Verified end-to-end against a real `next start` build: 13 markers spread, 5 sequential deletes 13 → 8 each a clean -1, persisted ids all `m-…`.
+
 ## 2026-05-12
 
 ### Fix: sphere controls render on empty-marker spheres
