@@ -3,7 +3,7 @@
 import { use, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { InteractiveSphereViewer } from "@/components/InteractiveSphereViewer"
+import { InteractiveSphereViewer, ensureMarkerIds } from "@/components/InteractiveSphereViewer"
 import { SphereSpecViewer } from "@/components/SphereSpecViewer"
 import { ImageUploader } from "@/components/ImageUploader"
 import { getGeneration } from "@/lib/dummy-data"
@@ -94,7 +94,10 @@ export default function PublicSharePage({
           if (row.environment) {
             try {
               const envData = JSON.parse(row.environment)
-              markers = envData.markers || null
+              // Stable-id augmentation: any markers from rows that pre-date the stable-id
+              // era get one assigned now (legacy index-derived for parity with what PSV used
+              // to register). Persisted on next save.
+              markers = envData.markers ? ensureMarkerIds(envData.markers) : null
               if (envData.profile?.name) profileName = envData.profile.name
             } catch {}
           }
@@ -232,22 +235,16 @@ export default function PublicSharePage({
                     setGenLabel(`Upscaling ${images.length} image${images.length === 1 ? "" : "s"}…`)
                     setPct(20)
                     try {
-                      const existing = (viewData.markers ?? []) as any[]
-                      const normalized = existing.map((m, i) => {
-                        const id =
-                          m.type === "profile" ? "profile-card"
-                          : m.type === "video" ? `video-${(m.data ?? {}).video_id}`
-                          : m.type === "audio" ? `audio-${i}-${encodeURIComponent((m.data ?? {}).url || "").slice(0, 24)}`
-                          : m.type === "bio-links" ? `bio-links-${i}`
-                          : `image-${i}`
-                        return {
-                          id,
-                          type: m.type,
-                          yaw: m.yaw,
-                          pitch: m.pitch,
-                          scene_width: m.scene_width,
-                        }
-                      })
+                      // viewData.markers came through ensureMarkerIds on load (and again on
+                      // every onMarkersChanged save), so every entry has a stable m.id.
+                      const existing = ensureMarkerIds(viewData.markers as any) as any[]
+                      const normalized = existing.map((m) => ({
+                        id: m.id,
+                        type: m.type,
+                        yaw: m.yaw,
+                        pitch: m.pitch,
+                        scene_width: m.scene_width,
+                      }))
                       setGenLabel("Harmony-packing new markers…")
                       setPct(70)
                       const { new_markers, repacked_existing } = await uploadAsMarkers({
@@ -261,14 +258,8 @@ export default function PublicSharePage({
 
                       // Merge: existing markers get new positions, new markers get appended.
                       const posById = new Map(repacked_existing.map((p) => [p.id, p]))
-                      const mergedExisting = existing.map((m, i) => {
-                        const mid =
-                          m.type === "profile" ? "profile-card"
-                          : m.type === "video" ? `video-${(m.data ?? {}).video_id}`
-                          : m.type === "audio" ? `audio-${i}-${encodeURIComponent((m.data ?? {}).url || "").slice(0, 24)}`
-                          : m.type === "bio-links" ? `bio-links-${i}`
-                          : `image-${i}`
-                        const p = posById.get(mid)
+                      const mergedExisting = existing.map((m) => {
+                        const p = posById.get(m.id)
                         return p ? { ...m, yaw: p.yaw, pitch: p.pitch } : m
                       })
                       const appended = [

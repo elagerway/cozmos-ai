@@ -50,12 +50,40 @@ interface BioLinksMarkerData {
 }
 
 interface MarkerDef {
+  // Stable per-marker id. Optional in the type for backward compat with rows that pre-date
+  // stable ids (those get one assigned the first time they're loaded; see ensureMarkerIds).
+  // After that the id is the source of truth for every lookup and never changes — even when
+  // sibling markers are added or removed.
+  id?: string
   type: "video" | "profile" | "image" | "audio" | "bio-links"
   yaw: number
   pitch: number
   scene_width?: number     // designed base width used to render HTML
   scene_scale?: number     // user-applied uniform scale multiplier (1 = default)
   data: VideoMarkerData | ProfileMarkerData | AudioMarkerData | BioLinksMarkerData | any
+}
+
+// Legacy index-based id derivation, used only when augmenting markers that pre-date the
+// stable-id era. Kept identical to the original convention so existing PSV registrations
+// in a live session keep working through this upgrade.
+function legacyMarkerId(m: MarkerDef, i: number): string {
+  if (m.type === "profile") return "profile-card"
+  if (m.type === "video") return `video-${(m.data as VideoMarkerData).video_id}`
+  if (m.type === "audio") return `audio-${i}-${encodeURIComponent((m.data as AudioMarkerData).url || "").slice(0, 24)}`
+  if (m.type === "bio-links") return `bio-links-${i}`
+  return `image-${i}`
+}
+
+// Fresh id for a brand-new marker (added in-session via the toolbar / copilot / Linktree
+// spread). Time + random suffix is plenty for uniqueness against legacy ids or each other.
+function generateMarkerId(): string {
+  return `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+// Fill in missing `id` fields on a markers array. Used by the page on load + by the viewer
+// defensively. Returns a new array — never mutates input.
+export function ensureMarkerIds(markers: MarkerDef[] | null | undefined): MarkerDef[] {
+  return (markers ?? []).map((m, i) => (m.id ? m : { ...m, id: legacyMarkerId(m, i) }))
 }
 
 interface Props {
@@ -434,8 +462,10 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
   }
 
   // Keep the latest markers prop reachable from refs-only closures (onMarkersChanged commit).
-  const markersRef = useRef(markers)
-  useEffect(() => { markersRef.current = markers }, [markers])
+  // markersRef tracks the markers prop but with every entry guaranteed to have a stable id.
+  // Every lookup in this component goes through markersRef.current and matches by m.id.
+  const markersRef = useRef<MarkerDef[]>(ensureMarkerIds(markers))
+  useEffect(() => { markersRef.current = ensureMarkerIds(markers) }, [markers])
   // Keep the latest onMarkersChanged reachable from long-lived closures (viewer init runs
   // once per imageUrl change; the prop is a fresh arrow every parent render).
   const onMarkersChangedRef = useRef(onMarkersChanged)
@@ -507,8 +537,10 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
     const yawDeg = (pos.yaw * 180) / Math.PI
     const pitchDeg = (pos.pitch * 180) / Math.PI
     const newMarker = builder(yawDeg, pitchDeg)
-    viewer.__biosphereAddMarker?.(newMarker)
-    const updated = [...markersRef.current, newMarker]
+    // __biosphereAddMarker stamps a stable id; use its return value so markersRef gets the
+    // augmented marker.
+    const augmented = viewer.__biosphereAddMarker?.(newMarker) ?? newMarker
+    const updated = [...markersRef.current, augmented]
     markersRef.current = updated
     if (onMarkersChanged) await onMarkersChanged(updated)
   }
@@ -518,13 +550,8 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
       Object.keys(movedPositionsRef.current).length > 0 ||
       Object.keys(resizedScalesRef.current).length > 0
     if (!onMarkersChanged || !hasChanges) return
-    const updated = markersRef.current.map((m, i) => {
-      // Keep in sync with markerIdFor() inside the viewer's ready handler.
-      const id = m.type === "profile" ? "profile-card"
-        : m.type === "video" ? `video-${(m.data as VideoMarkerData).video_id}`
-        : m.type === "audio" ? `audio-${i}-${encodeURIComponent((m.data as AudioMarkerData).url || "").slice(0, 24)}`
-        : m.type === "bio-links" ? `bio-links-${i}`
-        : `image-${i}`
+    const updated = markersRef.current.map((m) => {
+      const id = m.id!
       const newPos = movedPositionsRef.current[id]
       const newScale = resizedScalesRef.current[id]
       let next: MarkerDef = m
@@ -836,23 +863,16 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
         const makeScaleFn = (id: string) => (zoomLevel: number) =>
           computeScale(zoomLevel) * (userScalesRef.current[id] ?? 1)
 
-        // Compute a stable marker id + default design width for a MarkerDef
-        const markerIdFor = (m: MarkerDef, i: number): string => {
-          if (m.type === "profile") return "profile-card"
-          if (m.type === "video") return `video-${(m.data as VideoMarkerData).video_id}`
-          if (m.type === "audio") return `audio-${i}-${encodeURIComponent((m.data as AudioMarkerData).url || "").slice(0, 24)}`
-          if (m.type === "bio-links") return `bio-links-${i}`
-          return `image-${i}`
-        }
         const defaultWidthFor = (t: MarkerDef["type"]) =>
           t === "profile" ? 320 : t === "video" ? 360 : t === "image" ? 160 : t === "audio" ? 280 : 300
 
-        // Build html + PSV config for a marker
-        const buildMarkerConfig = (m: MarkerDef, i: number) => {
+        // Build html + PSV config for a marker. Always uses m.id (guaranteed set on entries
+        // pulled from markersRef, which was passed through ensureMarkerIds).
+        const buildMarkerConfig = (m: MarkerDef) => {
           const yawRad = (m.yaw * Math.PI) / 180
           const pitchRad = (m.pitch * Math.PI) / 180
           const sceneW = m.scene_width || defaultWidthFor(m.type)
-          const id = markerIdFor(m, i)
+          const id = m.id!
           userScalesRef.current[id] = m.scene_scale ?? 1
           let html = ""
           if (m.type === "profile") html = ProfileCardHTML(m.data as ProfileMarkerData, sceneW)
@@ -870,16 +890,17 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
           }
         }
 
-        for (let i = 0; i < markers.length; i++) {
-          markersPlugin.addMarker(buildMarkerConfig(markers[i], i) as any)
+        // Initial registration uses markersRef.current so every entry has an id.
+        for (const m of markersRef.current) {
+          markersPlugin.addMarker(buildMarkerConfig(m) as any)
         }
 
-        // Expose so the add-marker UI can inject new markers without re-init
-        ;(viewer as any).__biosphereAddMarker = (newMarker: MarkerDef) => {
-          const idx = markersRef.current.length
-          const config = buildMarkerConfig(newMarker, idx)
-          markersPlugin.addMarker(config as any)
-          return config.id
+        // Inject a new marker without re-init. Returns the augmented marker (with the freshly
+        // generated id stamped on it) so the caller can append it to markersRef and persist.
+        ;(viewer as any).__biosphereAddMarker = (newMarker: MarkerDef): MarkerDef => {
+          const augmented: MarkerDef = newMarker.id ? newMarker : { ...newMarker, id: generateMarkerId() }
+          markersPlugin.addMarker(buildMarkerConfig(augmented) as any)
+          return augmented
         }
         // Expose so deleteMarker can drop the visual marker in-place instead
         // of leaving a stale "already exists" ghost that blocks subsequent
@@ -895,14 +916,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
         // through a ref because viewer init runs once per imageUrl change but the prop
         // arrow is fresh every parent render.
         ;(viewer as any).__biosphereDeleteMarker = async (markerId: string) => {
-          const idx = markersRef.current.findIndex((m, i) => {
-            const id = m.type === "profile" ? "profile-card"
-              : m.type === "video" ? `video-${(m.data as any).video_id}`
-              : m.type === "audio" ? `audio-${i}-${encodeURIComponent((m.data as any).url || "").slice(0, 24)}`
-              : m.type === "bio-links" ? `bio-links-${i}`
-              : `image-${i}`
-            return id === markerId
-          })
+          const idx = markersRef.current.findIndex((m) => m.id === markerId)
           if (idx < 0) return
           const next = [...markersRef.current]
           next.splice(idx, 1)
@@ -915,16 +929,11 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
           if (onMarkersChangedRef.current) await onMarkersChangedRef.current(next)
         }
 
-        // Build new marker HTML at a given width, based on marker type
+        // Build new marker HTML at a given width, based on marker type. Looks up against
+        // markersRef (which has stable ids), not the captured prop.
         const rebuildMarkerHTML = (markerId: string, data: any, width: number): string | null => {
-          const origIdx = markers.findIndex((m, i) => {
-            const id = m.type === "profile" ? "profile-card"
-              : m.type === "video" ? `video-${(m.data as VideoMarkerData).video_id}`
-              : `image-${i}`
-            return id === markerId
-          })
-          if (origIdx < 0) return null
-          const orig = markers[origIdx]
+          const orig = markersRef.current.find((m) => m.id === markerId)
+          if (!orig) return null
           if (orig.type === "profile") return ProfileCardHTML(orig.data as ProfileMarkerData, width)
           if (orig.type === "video") return VideoThumbnailHTML(orig.data as VideoMarkerData, width)
           if (orig.type === "image") return ImageFrameHTML(orig.data as any, width)
@@ -1289,13 +1298,8 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
       }
     },
     getMarkers() {
-      return markersRef.current.map((m, i) => {
+      return markersRef.current.map((m) => {
         const anyM = m as any
-        const id = m.type === "profile" ? "profile-card"
-          : m.type === "video" ? `video-${(m.data as any).video_id}`
-          : m.type === "audio" ? `audio-${i}-${encodeURIComponent((m.data as any).url || "").slice(0, 24)}`
-          : m.type === "bio-links" ? `bio-links-${i}`
-          : `image-${i}`
         const d = anyM.data ?? {}
         const summary = m.type === "profile" ? (d.name || "Profile")
           : m.type === "video" ? (d.title || `Video ${d.video_id}`)
@@ -1303,7 +1307,7 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
           : m.type === "bio-links" ? (d.title || "Bio Links")
           : (d.title || "Image")
         return {
-          id,
+          id: m.id!,
           type: m.type,
           yaw: m.yaw,
           pitch: m.pitch,
@@ -1372,21 +1376,19 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
       await commitMarkerChanges()
     },
     async deleteMarker({ marker_id }) {
-      // Filter out the matching marker using the same ID derivation as commitMarkerChanges.
-      const idx = markersRef.current.findIndex((m, i) => {
-        const id = m.type === "profile" ? "profile-card"
-          : m.type === "video" ? `video-${(m.data as any).video_id}`
-          : m.type === "audio" ? `audio-${i}-${encodeURIComponent((m.data as any).url || "").slice(0, 24)}`
-          : m.type === "bio-links" ? `bio-links-${i}`
-          : `image-${i}`
-        return id === marker_id
-      })
+      // Route through the viewer's __biosphereDeleteMarker so PSV state, markersRef, the
+      // selection state, and the persist PATCH all stay in lockstep. Match by m.id directly.
+      const viewer: any = viewerRef.current
+      if (viewer?.__biosphereDeleteMarker) {
+        await viewer.__biosphereDeleteMarker(marker_id)
+        return
+      }
+      // Fallback (viewer not initialised yet — shouldn't happen but defensive):
+      const idx = markersRef.current.findIndex((m) => m.id === marker_id)
       if (idx < 0) return
       const next = [...markersRef.current]
       next.splice(idx, 1)
       markersRef.current = next
-      const viewer: any = viewerRef.current
-      viewer?.__biosphereRemoveMarker?.(marker_id)
       if (onMarkersChanged) await onMarkersChanged(next)
     },
     async regenerateBackground(input) {
@@ -1703,13 +1705,12 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
               yaw: viewYawDeg + m.yaw,
               pitch: viewPitchDeg + m.pitch,
             }))
-            // Crucial: __biosphereAddMarker reads markersRef.current.length to assign each
-            // new ID (e.g. bio-links-{N}). Push to the ref one-by-one so each call sees a
-            // length that matches the next array index. Batching the push to the end made
-            // all N markers claim the same ID ("bio-links-0 already exists" on link 2+).
+            // __biosphereAddMarker stamps a fresh stable id on each marker and returns the
+            // augmented copy — push that (not the un-augmented input) so markersRef carries
+            // the same id PSV registered.
             for (const m of stamped) {
-              viewer.__biosphereAddMarker?.(m)
-              markersRef.current = [...markersRef.current, m]
+              const augmented = viewer.__biosphereAddMarker?.(m) ?? m
+              markersRef.current = [...markersRef.current, augmented]
             }
             if (onMarkersChangedRef.current) await onMarkersChangedRef.current(markersRef.current)
             setAddOpen(false)
