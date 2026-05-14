@@ -1534,6 +1534,12 @@ async def reroll_background(body: dict):
     model = body.get("model", "blockade").strip().lower()
     if model not in ("blockade", "openai"):
         return JSONResponse({"error": f"unknown model: {model}"}, status_code=400)
+    # OpenAI path produces a ~14K upscaled image — always tile to the 16K tier
+    # so the viewer can serve that resolution. Otherwise the 14K source gets
+    # downsampled into the 8K cap and looks soft on /g/<id> compared to the
+    # raw equirect (which is why /test-sphere always looked sharper).
+    if model == "openai":
+        high_res = True
 
     if not gen_id:
         return JSONResponse({"error": "generation_id required"}, status_code=400)
@@ -1641,6 +1647,7 @@ async def reroll_background(body: dict):
                 "tile_stem": new_stem,
                 "tile_base_url": tile_base_url,
                 "background_prompt": prompt,
+                "high_res": high_res,
                 "reroll_count": (generations[gen_id].get("reroll_count", 0) + 1),
                 "last_rerolled_at": datetime.now(timezone.utc).isoformat(),
                 "duration_s": duration,
@@ -2065,6 +2072,7 @@ async def commit_reroll_variant(job_id: str, body: dict):
                 "tile_stem": new_stem,
                 "tile_base_url": tile_base_url,
                 "background_prompt": prompt,
+                "high_res": high_res,
                 "reroll_count": (generations[gen_id].get("reroll_count", 0) + 1),
                 "last_rerolled_at": datetime.now(timezone.utc).isoformat(),
                 "duration_s": duration,
