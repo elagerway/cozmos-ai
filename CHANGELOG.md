@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-05-14
+
+### OpenAI sphere-gen path — gpt-image-2 + Claude Opus 4.7 rewrite + fal ESRGAN, wired as a second Re-roll button
+- New backend module `openai_sphere_gen.py`: `generate_sphere_from_prompt_openai(prompt, *, on_progress, generation_id, feature) -> pyvips.Image`. Matches `sphere_gen.generate_sphere_from_prompt`'s contract so `server.py` can swap in by model param. Calls gpt-image-2 at `3840x1920` `quality="high"` (the max 2:1 the OpenAI Image API allows), then fal.ai ESRGAN x4 upscale to ~14142x7071, then back into `pyvips` for tile-pyramid input.
+- New shared helper `prompt_rewriter.py` with sync + async variants. Claude `claude-opus-4-7` rewrites short user prompts ("Music Studio Background") into 100–140 word photographic scene descriptions that name specific equipment ("long rows of faders, illuminated VU meters, two-inch tape machine reels, Steinway grand") instead of demoting the subject to a background prop. The earlier Haiku-based rewriter was actively hurting outputs by pushing user-named subjects into a tiny background window; the Opus system prompt explicitly says "AMPLIFY the user's intent, do not replace their subject." Cost is ~$0.04 per rewrite (negligible next to ~$0.50 image-gen + upscale).
+- `cost_tracker.py` gains `log_openai_imagegen(operation, model, size, quality, ...)`; pricing is a flat $0.25/call estimate keyed off model name. Refine when actual invoices land.
+- `POST /reroll-background` accepts `model: "blockade" | "openai"` (default "blockade"). When OpenAI, also forces `high_res=true` because the upscaled source is ~14K — without forcing, `generate_tiles` capped the pyramid at 8K and `/g/<id>` looked noticeably softer than `/test-sphere`. Both reroll-completion paths now write `high_res` back to the generation row so the viewer reads `LEVELS_HIGH_RES`.
+- `RerollBackgroundModal` adds a second action button — **Re-roll via OpenAI** (emerald) alongside the existing **Re-roll via Blockade** (blue). OpenAI always uses the direct path (no variant picker yet — that's Phase 2). Modal copy describes the actual pipeline; the misleading "~30s" claim from the first draft is gone (real wall time is ~3 min: rewrite + gpt-image-2 high-q + fal upscale + tile pyramid).
+- `lib/pipeline-client.ts` `RerollBackgroundInput.model` param plumbed through.
+- `InteractiveSphereViewer` gains a non-tile fallback: when `tileStem` is null, the Viewer is constructed with `panorama: imageUrl` (default adapter, raw equirect JPG) instead of the tile pyramid adapter. Used by the new `/test-sphere` dev tool. Production spheres always have a `tile_stem`, so this path is dormant in production.
+- New `app/test-sphere/` page: dev-only side-by-side viewer for raw vs upscaled OpenAI output across four sample scenes (studio / library / beach / forest). Renders `InteractiveSphereViewer` with `tileStem={null}` to hit the new fallback. Outputs live under `public/test-spheres/` (gitignored, regenerate locally with `python3 openai_sphere_test.py "<prompt>" <slug> --upscale`).
+- `requirements.txt` adds `openai` and `anthropic`.
+- Backend deployed to Railway; `OPENAI_API_KEY` set there (`ANTHROPIC_API_KEY` was already present for the copilot).
+
+### Findings (non-shipped)
+- **gpt-image-2 has two structural weak modes vs Blockade Skybox**: (1) outdoor / sky scenes get a flat cylindrical photo at the poles instead of an equirect dome — straight up looks like a band, not a zenith. (2) Detail-dense subjects (mixing desks, lab gear, cockpits) hallucinate badly — rows of small buttons become noise. The Opus rewriter mitigates (2) substantially when the user prompt is detailed; (1) is structural and can't be prompted around. Blockade stays the default for that reason.
+- **The "Comfort" rig already does barrel correction**: `lib/viewer-camera.ts` `attachAntiDistortionRig` overrides `minFov`/`maxFov` to 30°/95° AND applies an inverse-barrel WebGL pass with `barrelStrengthAtMaxFov: 0.18` ramping in above 70° FoV. Any future "remove fisheye" UX should drive that strength, not the Viewer's ctor `maxFov` (which the rig silently clobbers).
+- Sphere viewer zoom defaults (`defaultZoomLvl: 50`, no `maxFov`) restored — earlier attempts to widen the default zoom landed at the same `fovMaxDeg: 95` ceiling enforced by the rig and weren't actually doing what the commit messages claimed.
+
 ## 2026-05-13
 
 ### Linktree import — each link becomes its own marker, fanned around the view

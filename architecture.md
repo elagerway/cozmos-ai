@@ -15,7 +15,11 @@ AI-powered interactive 360° biospheres for influencers. Users type a name or pr
 - **Runtime**: Python 3.12, Docker with Chromium (Playwright)
 - **Image Processing**: pyvips (16K compositing, tile pyramid generation)
 - **AI Upscaling**: fal.ai ESRGAN (4x GPU upscaling)
-- **360° Generation**: Blockade Labs Skybox AI (M3 Photoreal, 8K → 16K export) — default AI path. Also: **Google Gemini 3 Pro Image** (`gemini-3-pro-image-preview`, Nano Banana Pro) used on the user-upload outpaint path when an uploaded photo is not already equirectangular.
+- **360° Generation**:
+  - **Blockade Labs Skybox AI** (M3 Photoreal, 8K → 16K export) — default AI path, only one with correct equirect polar projection.
+  - **OpenAI gpt-image-2** (3840x1920 high quality) + fal ESRGAN 4× — alternative path for the "Re-roll via OpenAI" button. Prompts are first rewritten via Claude Opus 4.7 (`prompt_rewriter.py`) to amplify the user's subject with concrete equipment language; gpt-image-2 then produces an equirect-shaped image; fal upscales to ~14K. Interior scenes only — outdoor/sky scenes warp at the poles regardless of prompt.
+  - **Google Gemini 3 Pro Image** (`gemini-3-pro-image-preview`, Nano Banana Pro) — used on the user-upload outpaint path when an uploaded photo is not already equirectangular.
+- **Prompt rewriting**: Claude Opus 4.7 (`claude-opus-4-7`) via `prompt_rewriter.py`. Sync + async variants. Used by the OpenAI sphere-gen path to amplify thin prompts (e.g. "Music Studio Background") into ~100–140 word photographic scene descriptions naming concrete equipment / materials / lighting. Cost ~$0.04 per rewrite, logged under `feature=bg_reroll, operation=prompt_rewrite`.
 - **Scene Analysis**: Claude Vision API (detect TVs/screens for marker placement)
 - **Social Scraping**: YouTube (channel + video data), Instagram (instagrapi), Twitter/TikTok (meta tags), Playwright (screenshots)
 
@@ -40,13 +44,14 @@ AI-powered interactive 360° biospheres for influencers. Users type a name or pr
 - `app/api/events/route.ts` / `summary/route.ts` — Event ingest + heatmap aggregation (patents GB '335 / US '706)
 - `components/InteractiveSphereViewer.tsx` — PSV viewer with markers, edit mode (drag-move, corner-drag resize), portal-mounted controls, HTML-marker XSS escapers, heatmap overlay, Cmd+K copilot toggle
 - `components/AddMarkerModal.tsx` — Tabbed "+ Add" modal for Image/Video/Audio/Bio Links; native-event backdrop so PSV underneath can't steal focus
-- `components/RerollBackgroundModal.tsx` — 🎨 Reroll BG: prompt input + curated style presets + advanced negative prompt + Ultra HD toggle + 4-variant picker flow OR direct single-shot. Renders inside `psvHost` for fullscreen-safe overlays
+- `components/RerollBackgroundModal.tsx` — 🎨 Reroll BG: prompt input + curated style presets + advanced negative prompt + Ultra HD toggle. **Two action buttons** in the bottom row: **Re-roll via OpenAI** (emerald — `model=openai` → Claude rewrite → gpt-image-2 → fal ESRGAN, interiors only, ~3 min) and **Re-roll via Blockade** (blue — default, 4-variant picker OR direct single-shot, ~3 min, correct polar projection). Renders inside `psvHost` for fullscreen-safe overlays.
+- `app/test-sphere/page.tsx` — dev-only QA page: four sample equirect scenes (studio / library / beach / forest) loaded via `InteractiveSphereViewer` with `tileStem={null}` (non-tile fallback path). Files under `public/test-spheres/` are gitignored — regenerate locally with `python3 openai_sphere_test.py "<prompt>" <slug> --upscale`.
 - `components/CategoryExcludeModal.tsx` — 🚫 Categories: checkbox UI with live per-category counts + strictness slider. Calls `/repack-markers` (patent US '666)
 - `components/CopilotPanel.tsx` — ✨ Copilot / Cmd+K drawer in edit mode. Claude Sonnet 4.6 default / Opus 4.7 toggle. 10 tools including `regenerate_background`, `exclude_categories`, marker CRUD, `get_analytics`. History in sessionStorage
 - `components/SphereViewer.tsx` — Basic sphere viewer (non-interactive)
 - `components/ImageUploader.tsx` — Drag-and-drop upload with Composite/New Sphere toggle. Composite now calls `/upload-as-markers` (same gen_id, interactive image markers) — New Sphere still spawns a fresh gen
 - `lib/supabase.ts` — Supabase client, fetchGenerations, deleteGeneration
-- `lib/pipeline-client.ts` — Railway API client: generate, poll, upload, `startBackgroundReroll`, `startVariantReroll`, `getVariantJob`, `commitVariant`, `repackMarkers`, `uploadAsMarkers`
+- `lib/pipeline-client.ts` — Railway API client: generate, poll, upload, `startBackgroundReroll` (takes `model: "blockade" | "openai"`), `startVariantReroll`, `getVariantJob`, `commitVariant`, `repackMarkers`, `uploadAsMarkers`
 - `lib/event-tracker.ts` — `useEventTracker()` hook. sessionStorage session IDs, 3s flush, `sendBeacon` on `pagehide`
 - `lib/viewer-camera.ts` — `attachAntiDistortionRig()`: 6 anti-sickness behaviours (patents EP '953 / CN '718 / US '579)
 - `lib/pricing.ts` — Vendor price catalogue with last-verified dates
@@ -71,6 +76,8 @@ All five types share a single flat-panel `CARD_STYLE` — semi-transparent near-
 ### Pipeline
 - `server.py` — FastAPI server, all endpoints, pipeline orchestration
 - `sphere_gen.py` — Blockade Labs API integration. `generate_skybox_8k()` + `export_skybox_16k()` split for variant picker reuse; `generate_skybox()` wraps both for the classic one-shot flow
+- `openai_sphere_gen.py` — OpenAI gpt-image-2 + fal ESRGAN integration. Async `generate_sphere_from_prompt_openai()` matches `sphere_gen.py`'s contract so `server.run_reroll` can swap modules by `model` param. Calls `prompt_rewriter.rewrite_user_prompt` first when `rewrite=True` (default).
+- `prompt_rewriter.py` — Shared Claude Opus 4.7 rewriter (sync + async variants). System prompt explicitly amplifies user intent rather than demoting it — see code for examples and the "do not demote subject" guidance baked in.
 - `profile_scraper.py` — YouTube/Instagram/Twitter/TikTok scraping, marker building. Honors `IG_PROXY_URL` for residential-proxy routing
 - `scene_analyzer.py` — Claude Vision scene analysis + harmony packer (`_pack_harmonically`, `_marker_box`, `_collides`, `_yaw_delta`) practicing patents US '455 / '565 / '580 / GB '147 / EP '254 / US '349 / CN '866
 - `style_analyzer.py` — Color/mood extraction from images
@@ -88,7 +95,7 @@ All five types share a single flat-panel `CARD_STYLE` — semi-transparent near-
 | `POST /upload-as-markers` | Upscale uploads + harmony-pack as `image` markers on an EXISTING sphere (preserves gen_id) |
 | `POST /scrape-profile` | Single-handle profile lookup. Body `{ handle, platform: "instagram"|"youtube"|"twitter"|"tiktok" }` → unified JSON `{ name, bio, profile_image, followers, ... }`. Used by the copilot's `add_social_profile_marker` tool. |
 | `POST /scrape-linktree` | Public Linktree page → `{ username, profile_image, page_title, links: [{title, url}] }`. Accepts `{ url }` as `linktr.ee/<handle>`, `https://linktr.ee/<handle>`, or bare handle. Parses `__NEXT_DATA__`, filters HEADER/divider rows. Used by AddMarkerModal's `Spread` button to scatter each link as its own bio-links marker around the user's current view. |
-| `POST /reroll-background` | Regenerate only the background; markers preserved; versioned tile stem |
+| `POST /reroll-background` | Regenerate only the background; markers preserved; versioned tile stem. Accepts `model: "blockade" \| "openai"` (default "blockade"). OpenAI path forces `high_res=true` because the ~14K source needs the 16K tile tier to avoid soft 8K downsample; both paths now persist `high_res` back to the generation row so `/g/<id>` reads `LEVELS_HIGH_RES`. |
 | `POST /reroll-variants` | Generate N × 8K previews for the variant picker |
 | `GET /reroll-variants/{id}` | Poll variant-job state |
 | `POST /reroll-variants/{id}/commit` | Commit chosen preview → 16K export + tile swap |
@@ -134,7 +141,7 @@ Frontend navigates to /g/{id} → InteractiveSphereViewer with markers
 ## Environment Variables
 
 ### Railway
-FAL_KEY, BLOCKADE_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY, ANTHROPIC_API_KEY, INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD, IG_PROXY_URL (optional — residential proxy for Instagram; see `.audit/notes/residential-ig-proxy-plan.md`)
+FAL_KEY, BLOCKADE_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY, ANTHROPIC_API_KEY, INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD, IG_PROXY_URL (optional — residential proxy for Instagram; see `.audit/notes/residential-ig-proxy-plan.md`)
 
 ### Vercel
 NEXT_PUBLIC_PIPELINE_URL, NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY (server-side), ANTHROPIC_API_KEY (for copilot), ADMIN_PASSWORD (admin dashboard gate)
