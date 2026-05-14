@@ -70,7 +70,8 @@ export function SphereViewer({ imageUrl, tileStem, tileBaseUrl, highRes = false 
             tileUrl: (col: number, row: number, level: number) =>
               `${base}/${level}/${col}_${row}.jpg`,
           },
-          defaultZoomLvl: 50,
+          // Lower zoom = wider FoV; matches InteractiveSphereViewer default.
+          defaultZoomLvl: 20,
           minFov: 15,
           touchmoveTwoFingers: false,
           navbar: ["zoom", "fullscreen"],
@@ -87,7 +88,7 @@ export function SphereViewer({ imageUrl, tileStem, tileBaseUrl, highRes = false 
         const viewer = new Viewer({
           container: containerRef.current,
           panorama: imageUrl,
-          defaultZoomLvl: 50,
+          defaultZoomLvl: 20,
           minFov: 15,
           touchmoveTwoFingers: false,
           navbar: ["zoom", "fullscreen"],

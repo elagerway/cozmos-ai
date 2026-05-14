@@ -765,7 +765,9 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
           ? { adapter: EquirectangularTilesAdapter }
           : {}),
         panorama: useTiles ? tilePanorama : imageUrl,
-        defaultZoomLvl: 50,
+        // Lower zoom = wider FoV. 50 ≈ 60° (binocular-y), 20 ≈ 85° (you're in
+        // the room). Sphere panoramas need the wider default to read as immersive.
+        defaultZoomLvl: 20,
         defaultPitch: 0,
         minFov: 15,
         touchmoveTwoFingers: false,
