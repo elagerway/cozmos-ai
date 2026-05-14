@@ -765,11 +765,14 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
           ? { adapter: EquirectangularTilesAdapter }
           : {}),
         panorama: useTiles ? tilePanorama : imageUrl,
-        // Lower zoom = wider FoV. 50 ≈ 60° (binocular-y), 20 ≈ 85° (you're in
-        // the room). Sphere panoramas need the wider default to read as immersive.
-        defaultZoomLvl: 20,
+        // maxFov capped at the photo-sphere-viewer default 90° meant "fully
+        // zoomed out" still felt cropped. Bump to 120° so users can pan back
+        // to a wide-angle establishing view. defaultZoomLvl 10 puts the
+        // initial view near (but not at) the wide end (~110° FoV).
+        defaultZoomLvl: 10,
         defaultPitch: 0,
         minFov: 15,
+        maxFov: 120,
         touchmoveTwoFingers: false,
         navbar: ["zoom", "fullscreen"],
         plugins: [
