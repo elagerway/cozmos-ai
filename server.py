@@ -1519,6 +1519,9 @@ async def reroll_background(body: dict):
         style_id: int?     — Blockade Labs style id (default 119 = M3 Photoreal)
         negative_text: str? — override negative prompt
         high_res: bool?    — if true, emit 16K tile tier (slower, sharper on extreme zoom)
+        model: str?        — "blockade" (default, ~3 min, best quality + correct
+                              poles) or "openai" (~30s, cheaper, interiors only —
+                              outdoor scenes regress at the poles).
 
     Returns { "job_id": "<generation_id>" } — poll /generate/<id> for progress,
     same as /generate-from-prompt.
@@ -1528,6 +1531,9 @@ async def reroll_background(body: dict):
     style_id = body.get("style_id")
     negative_text = body.get("negative_text")
     high_res = bool(body.get("high_res", False))
+    model = body.get("model", "blockade").strip().lower()
+    if model not in ("blockade", "openai"):
+        return JSONResponse({"error": f"unknown model: {model}"}, status_code=400)
 
     if not gen_id:
         return JSONResponse({"error": "generation_id required"}, status_code=400)
@@ -1553,11 +1559,12 @@ async def reroll_background(body: dict):
             update_generation_status(gen_id, {"step": step, "step_label": label})
 
         try:
-            from sphere_gen import generate_sphere_from_prompt
-
             update("scrape", 5, "Preparing reroll...")
 
+            # Progress translations for both gen paths so the modal's polling
+            # surface stays the same regardless of model.
             def on_skybox_progress(status):
+                # Blockade statuses
                 if status == "pending":
                     update("scrape", 10, "Queued for generation...")
                 elif status == "dispatched":
@@ -1568,20 +1575,43 @@ async def reroll_background(body: dict):
                     update("upscale", 55, "Exporting native 16K...")
                 elif status.startswith("export_"):
                     update("compose", 60, "Processing 16K export...")
+                # OpenAI path statuses
+                elif status == "rewriting_prompt":
+                    update("scrape", 10, "Rewriting prompt for optimal output...")
+                elif status == "openai_generating":
+                    update("scrape", 20, "Generating with gpt-image-2...")
+                elif status == "openai_done":
+                    update("scrape", 45, "Base image ready, upscaling...")
+                elif status == "upscaling":
+                    update("upscale", 50, "Upscaling 4x via fal ESRGAN...")
+                elif status == "upscale_done":
+                    update("compose", 65, "Upscale complete")
 
             loop = asyncio.new_event_loop()
-            canvas = loop.run_until_complete(
-                generate_sphere_from_prompt(
-                    prompt,
-                    on_progress=on_skybox_progress,
-                    generation_id=gen_id,
-                    feature="bg_reroll",
-                    style_id=style_id,
-                    negative_text=negative_text,
+            if model == "openai":
+                from openai_sphere_gen import generate_sphere_from_prompt_openai
+                canvas = loop.run_until_complete(
+                    generate_sphere_from_prompt_openai(
+                        prompt,
+                        on_progress=on_skybox_progress,
+                        generation_id=gen_id,
+                        feature="bg_reroll",
+                    )
                 )
-            )
+            else:
+                from sphere_gen import generate_sphere_from_prompt
+                canvas = loop.run_until_complete(
+                    generate_sphere_from_prompt(
+                        prompt,
+                        on_progress=on_skybox_progress,
+                        generation_id=gen_id,
+                        feature="bg_reroll",
+                        style_id=style_id,
+                        negative_text=negative_text,
+                    )
+                )
             loop.close()
-            update("compose", 70, "16K panorama ready")
+            update("compose", 70, "Panorama ready")
 
             # Tile pyramid to a NEW versioned stem — old tiles untouched.
             def on_tile_progress(done, total):

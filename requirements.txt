@@ -9,3 +9,5 @@ requests
 python-dotenv
 playwright
 instagrapi
+openai
+anthropic

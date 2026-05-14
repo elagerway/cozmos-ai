@@ -48,6 +48,13 @@ GEMINI_IMAGEGEN_PER_CALL = {
     "gemini-3-pro-image-preview": 0.24,
 }
 
+# OpenAI gpt-image-2 — per-call flat estimate at high quality. 3840x1920 sits
+# in the experimental size tier; refine when invoices land.
+OPENAI_IMAGEGEN_PER_CALL = {
+    "gpt-image-2": 0.25,
+    "gpt-image-2-2026-04-21": 0.25,
+}
+
 
 def price_anthropic(model: str, input_tokens: int, output_tokens: int) -> float:
     rates = ANTHROPIC_RATES.get(model)
@@ -194,6 +201,36 @@ def log_gemini_imagegen(
         meta.update(metadata)
     _insert_row({
         "service": "google_gemini",
+        "operation": operation,
+        "model": model,
+        "input_units": 1,
+        "unit_type": "calls",
+        "cost_usd": round(cost, 6),
+        "generation_id": generation_id,
+        "feature": feature,
+        "metadata": meta,
+    })
+    return cost
+
+
+def log_openai_imagegen(
+    *,
+    model: str,
+    size: str,
+    quality: str,
+    operation: str = "image_generate",
+    generation_id: Optional[str] = None,
+    feature: Feature = "bg_reroll",
+    prompt: Optional[str] = None,
+    metadata: Optional[dict[str, Any]] = None,
+) -> float:
+    """Log a gpt-image-2 call. Flat per-call estimate; tighten when actuals land."""
+    cost = OPENAI_IMAGEGEN_PER_CALL.get(model, 0.25)
+    meta = {"model": model, "size": size, "quality": quality, "prompt": prompt}
+    if metadata:
+        meta.update(metadata)
+    _insert_row({
+        "service": "openai",
         "operation": operation,
         "model": model,
         "input_units": 1,

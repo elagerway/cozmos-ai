@@ -132,12 +132,17 @@ export async function startBgUploadGeneration(input: {
   return res.json()
 }
 
+export type RerollModel = "blockade" | "openai"
+
 export interface RerollBackgroundInput {
   generationId: string
   prompt: string
   styleId?: number
   negativeText?: string
   highRes?: boolean
+  // "blockade" (default) — best quality, correct poles, ~3 min.
+  // "openai"   — gpt-image-2 + fal ESRGAN 4x, ~30s, interiors only.
+  model?: RerollModel
 }
 
 export async function startBackgroundReroll(
@@ -152,6 +157,7 @@ export async function startBackgroundReroll(
       style_id: input.styleId,
       negative_text: input.negativeText,
       high_res: input.highRes ?? false,
+      model: input.model ?? "blockade",
     }),
   })
   if (!res.ok) {

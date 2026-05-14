@@ -53,3 +53,10 @@ next-env.d.ts
 # agent + browser-test scratch (local only)
 .claude
 .playwright-mcp
+
+# OpenAI sphere prove-out outputs (large binary scratch — regenerate locally)
+/public/test-spheres
+/test_sphere_*.jpg
+/studio_crop_*.jpg
+/test-sphere-*.png
+/test-sphere-v*.png

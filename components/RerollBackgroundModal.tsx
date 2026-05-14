@@ -93,18 +93,21 @@ export function RerollBackgroundModal({
     }
   }
 
-  async function startFlow() {
+  async function startFlow(model: "blockade" | "openai" = "blockade") {
     if (!prompt.trim()) return
     setError(null)
     try {
-      if (skipVariants) {
-        // Classic direct reroll — skip variant picker, go straight to full render.
+      if (skipVariants || model === "openai") {
+        // Direct reroll — skip variant picker, go straight to full render.
+        // OpenAI path is always direct in this phase; variants for OpenAI are
+        // a follow-up phase.
         await startBackgroundReroll({
           generationId,
           prompt: prompt.trim(),
           styleId,
           negativeText: negative,
           highRes,
+          model,
         })
         setStage({ kind: "committing", jobId: generationId, variantId: "direct" })
         pollRef.current = window.setInterval(async () => {
@@ -300,10 +303,12 @@ export function RerollBackgroundModal({
             <div className="mt-5 flex items-center justify-between gap-2">
               <p className="text-xs text-white/40">
                 {skipVariants
-                  ? "Single full render. ~3 min total."
+                  ? "Single full render."
                   : "4 × 8K previews (~90s). Pick one → full 16K render."}
+                {" "}
+                Fast path: gpt-image-2 + fal ESRGAN 4× (interiors only — outdoor scenes warp at the poles).
               </p>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button
                   onClick={onClose}
                   className="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm hover:bg-white/10"
@@ -311,11 +316,20 @@ export function RerollBackgroundModal({
                   Cancel
                 </button>
                 <button
-                  onClick={startFlow}
+                  onClick={() => startFlow("openai")}
                   disabled={!prompt.trim()}
+                  title="OpenAI gpt-image-2 + fal ESRGAN 4× — ~30s. Best for interior scenes; outdoor scenes lose correct polar projection."
+                  className="rounded-lg border border-emerald-400 bg-emerald-500/15 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500/25 disabled:opacity-40"
+                >
+                  Re-roll fast (OpenAI ~30s)
+                </button>
+                <button
+                  onClick={() => startFlow("blockade")}
+                  disabled={!prompt.trim()}
+                  title="Blockade Skybox AI — ~3 min. Best overall quality and only path that handles outdoor/sky scenes correctly."
                   className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-400 disabled:opacity-40"
                 >
-                  {skipVariants ? "Render background" : "Generate 4 variants"}
+                  {skipVariants ? "Re-roll (Blockade ~3min)" : "Generate 4 variants (Blockade)"}
                 </button>
               </div>
             </div>

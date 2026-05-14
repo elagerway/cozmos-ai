@@ -580,17 +580,23 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
       if (destroyed || !containerRef.current) return
 
       const stem = tileStem
+      const useTiles = !!stem
       const { Viewer } = await import("@photo-sphere-viewer/core")
-      const { EquirectangularTilesAdapter } = await import(
-        "@photo-sphere-viewer/equirectangular-tiles-adapter"
-      )
       const { MarkersPlugin } = await import("@photo-sphere-viewer/markers-plugin")
+      // Tiles adapter is only needed when a tile pyramid exists. Raw equirect
+      // JPGs (e.g. prove-out scratch images) use the default panorama loader.
+      const EquirectangularTilesAdapter = useTiles
+        ? (await import("@photo-sphere-viewer/equirectangular-tiles-adapter"))
+            .EquirectangularTilesAdapter
+        : null
 
       if (destroyed || !containerRef.current) return
 
-      const base = tileBaseUrl
-        ? `${tileBaseUrl}/tiles/${stem}`
-        : `/spheres/tiles/${stem}`
+      const base = useTiles
+        ? tileBaseUrl
+          ? `${tileBaseUrl}/tiles/${stem}`
+          : `/spheres/tiles/${stem}`
+        : ""
 
       // Inject styles for markers and edit mode
       const style = document.createElement("style")
@@ -747,15 +753,18 @@ export function InteractiveSphereViewer({ imageUrl, tileStem, tileBaseUrl, highR
       `
       containerRef.current.appendChild(style)
 
+      const tilePanorama = {
+        baseUrl: `${base}/base.jpg`,
+        levels: highRes ? LEVELS_HIGH_RES : LEVELS_STANDARD,
+        tileUrl: (col: number, row: number, level: number) =>
+          `${base}/${level}/${col}_${row}.jpg`,
+      }
       const viewer = new Viewer({
         container: containerRef.current,
-        adapter: EquirectangularTilesAdapter,
-        panorama: {
-          baseUrl: `${base}/base.jpg`,
-          levels: highRes ? LEVELS_HIGH_RES : LEVELS_STANDARD,
-          tileUrl: (col: number, row: number, level: number) =>
-            `${base}/${level}/${col}_${row}.jpg`,
-        },
+        ...(useTiles && EquirectangularTilesAdapter
+          ? { adapter: EquirectangularTilesAdapter }
+          : {}),
+        panorama: useTiles ? tilePanorama : imageUrl,
         defaultZoomLvl: 50,
         defaultPitch: 0,
         minFov: 15,
