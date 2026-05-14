@@ -44,18 +44,18 @@ except (ImportError, OSError):
     HAS_PYVIPS = False
 
 
-# Prefix has three jobs, in order of importance:
+# Two jobs in order of importance:
 # 1. Anchor projection: "cylindrical equidistant projection" + "360 VR viewer"
 #    is the EvoLink/pixelsham (May 2026) recipe that flips gpt-image-2 from a
 #    flat cylindrical photo to a true equirect with dome ceiling + wrap.
-# 2. Anchor photographic quality: real-camera language (AD-style, 360 panoramic
-#    camera, real-camera exposure) pulls the model toward photo-trained weights
-#    instead of stylized illustration weights.
-# 3. Steer away from dense-mechanical-detail hallucinations. gpt-image-2's
-#    weakest mode is rows of small buttons / readouts (mixing desks, lab gear,
-#    cockpits) where it averages into "rocks-in-glass" noise. Telling it
-#    explicitly to find detail in materials/light/form instead of in
-#    mechanical micro-features measurably reduces the garbage.
+# 2. Anchor photographic quality: real-camera language pulls the model toward
+#    photo-trained weights instead of stylized illustration weights.
+#
+# We previously had a "Composition: keep mid-ground clean" detail-reduction
+# steer here. Removed — it was demoting the user's central subject (e.g.
+# burying a mixing console the user explicitly wanted to see). The model
+# renders gear convincingly when the prompt names specific gear; that's the
+# rewriter's job now.
 SEAM_PROMPT_PREFIX = (
     # 1. Projection
     "Generate a 360-degree equirectangular (cylindrical equidistant projection) "
@@ -63,15 +63,9 @@ SEAM_PROMPT_PREFIX = (
     "panorama: the left and right edges must wrap continuously, with no warping "
     "at the zenith or nadir poles. "
     # 2. Photographic quality anchor
-    "Photographic style: high-end architectural interior photography in the "
-    "manner of Architectural Digest. Captured on a professional 360 panoramic "
-    "camera with natural ambient and key lighting. Real-camera color, exposure, "
-    "and depth. Materials and finishes are photographically faithful. "
-    # 3. Detail-reduction steer
-    "Composition: keep mid-ground and background surfaces clean and "
-    "uncluttered. Detail should come from materials, light, and form — not "
-    "from dense rows of small controls, illegible readouts, busy rack gear, "
-    "or fragmented mechanical micro-detail. "
+    "Ultra-hd photographic quality. Captured on a professional 360 panoramic "
+    "camera with real-camera color, exposure, and depth. Materials and finishes "
+    "are photographically faithful. "
     # Anti-text
     "No text, letters, words, signs, labels, logos, watermarks, or typography. "
     "Scene: "

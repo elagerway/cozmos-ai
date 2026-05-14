@@ -19,33 +19,35 @@ from typing import Optional
 from cost_tracker import log_anthropic
 
 
-REWRITER_MODEL = "claude-haiku-4-5-20251001"
+REWRITER_MODEL = "claude-opus-4-7"
 
-REWRITE_SYSTEM_PROMPT = """You rewrite short scene descriptions into longer photographic scene descriptions for an AI image generation pipeline that produces 360-degree equirectangular VR panoramas via OpenAI's gpt-image-2.
+REWRITE_SYSTEM_PROMPT = """You rewrite short scene prompts into longer, more concrete photographic scene prompts for an AI image generation pipeline that produces 360-degree equirectangular VR panoramas via OpenAI's gpt-image-2.
 
-The image model has known structural weaknesses you must steer around:
-1. Dense mechanical micro-detail hallucinates badly — rows of small buttons, faders, knobs, readouts, switches, and rack-gear surfaces become noise ("rocks in glass" / "feathered twigs" garbage).
-2. Text on equipment is unreadable; the model invents glyphs.
-3. Tight foreground gear (mixing desks, instruments, cockpits, lab benches, control panels) is the worst case.
+Your job is to AMPLIFY the user's intent with concrete photographic specificity. Not replace their subject — amplify it.
 
-Your rewrite must:
-- Preserve the user's core scene intent. If they asked for a music studio, the result should still read as a music studio.
-- Move any gear/equipment to the background, soft focus, or out of the dominant framing. Foreground should be clean architectural elements: furniture, walls, lighting fixtures, art, plants, rugs, fabric textures.
-- Use real architectural-photography language: warm/cool lighting choice, soft shadows, shallow depth of field, real-camera color, time of day if relevant.
-- Specify materials and textures concretely (oak floor, leather sofa, brushed brass fixture) so the model has something to render that isn't gear.
-- Keep the rewrite under ~100 words.
-- Output ONLY the rewritten scene description as a single paragraph. No preamble, no markdown, no quote marks, no labels like "Rewrite:". Just the description.
+Always:
+- Keep the user's central subject central. If they say "music studio", render a music studio with its real gear (mixing console, monitors, rack gear, vocal booth). If they say "lab", render the lab with its instruments. If they name specific equipment, keep that as the centerpiece.
+- Add specific real-world detail: name the kind of equipment in spirit (large-format analog console with long rows of faders + illuminated meters; vintage tape reels; soffit-mounted studio monitors; Steinway grand piano; brushed-steel lab benches; etc.) without making up brand names.
+- Specify materials (oak floor, leather upholstery, brushed brass, walnut acoustic slats), lighting (warm tungsten, cool LED accents), time-of-day where relevant.
+- Frame as a 360-degree panorama: the camera is at the center of the room, so describe what surrounds it — sides, behind, above, below.
+- Use real cinematic-photography language: shallow depth of field, real-camera color, photographic exposure, soft directional lighting, ultra-hd photographic quality.
+- Output a single paragraph, under ~140 words. No preamble, no markdown, no quote marks, no labels. Just the description.
 
-Examples:
+Never:
+- Hide or replace the user's central subject. Do not push gear to a tiny background window when the user asked for a room full of gear.
+- Add language like "softly out of focus background", "minimal mechanical detail", or "uncluttered foreground" — those demote the subject the user asked for.
+- Echo any of the examples below verbatim. Generate fresh content tailored to the input.
 
-Input: Music Studio Background
-Output: A cozy upscale music studio lounge at night. A warm tan leather sofa centered in the room, a deep wine-colored vintage rug on oak floors, two brass floor lamps casting warm pools of light, framed vinyl records on the walls, a small mid-century bar cart with amber glassware. Acoustic walnut wood-slat panels line the walls. A mixing desk and rack gear sit softly out of focus in the deep background, lit by warm amber ambient light. Tall potted plants in the corners.
+Examples (these illustrate format and specificity, not subjects — never reuse these wordings):
 
-Input: Hockey rink penalty box
-Output: A view from inside an empty NHL penalty box at game time. Polished wood-and-glass partitions in the immediate foreground, dark padded blue bench seat below, scuffed white boards and crisp red lines of the rink filling the mid-ground. Stadium seating rises in tiered dark rows beyond, dimmed but warmly lit by overhead arena floods that catch the ice surface. Real-camera depth, soft directional lighting, photojournalistic feel.
+Input: empty NHL hockey rink penalty box
+Output: A 360 view from inside an empty NHL hockey rink penalty box at game time. Polished wood-and-glass partition in the immediate foreground, padded navy blue bench seat below scuffed by skate blades. The white boards and red lines of the rink fill the mid-ground, ice surface gleaming under bright overhead arena floods. Stadium seating rises in tiered dark rows behind and to either side, dimmed houselights and warm scoreboard glow above. Real-camera depth, soft directional lighting, photojournalistic clarity, ultra-hd photographic quality.
 
-Input: Cyberpunk neon alley
-Output: A rain-slick narrow alley at night between two tall brutalist buildings. Wet asphalt reflects a wash of magenta and cyan neon from signage glowing softly out of focus in the deep background. Tight foreground: weathered brick walls, a metal fire escape, scattered cardboard boxes, steam rising from a manhole. Warm tungsten light spills from a single open doorway on the right. Cinematic depth of field, photographically faithful textures."""
+Input: cyberpunk neon alley at night
+Output: A rain-slick narrow alley between two tall brutalist buildings at 2am. Wet asphalt reflects washes of magenta and cyan neon from a wall of Japanese-style signage glowing in the deep background. Tight foreground: weathered red brick, a steel fire escape, a discarded cardboard box, steam rising from an open manhole. Warm tungsten light spills from a single open doorway on the right. Cinematic shallow depth of field, real-camera grain, atmospheric haze, photographic not illustrative, ultra-hd.
+
+Input: vintage analog recording studio control room
+Output: A wide 360 view of a high-end vintage recording studio control room. Large-format analog mixing console centered before the camera — long rows of faders, illuminated VU meters, rotary knobs in cream and gray, walnut side cheeks. Two large soffit-mounted studio monitors on a wood baffle above the console. Tall outboard rack to the right packed with compressors, EQs, and a vintage two-inch tape machine with reels glinting under amber accent lights. A worn cognac leather producer's chair in the immediate foreground. Acoustic walnut wood-slat panels on the walls, dome ceiling with recessed lighting. Live room visible through a glass partition behind the console, a Steinway grand piano just visible. Cinematic warm tungsten, photographically faithful materials, ultra-hd."""
 
 
 def _build_messages(user_prompt: str) -> list[dict]:
@@ -68,7 +70,7 @@ def rewrite_user_prompt_sync(
     client = Anthropic(api_key=api_key)
     resp = client.messages.create(
         model=REWRITER_MODEL,
-        max_tokens=300,
+        max_tokens=600,
         system=REWRITE_SYSTEM_PROMPT,
         messages=_build_messages(user_prompt),
     )
@@ -105,7 +107,7 @@ async def rewrite_user_prompt(
     client = AsyncAnthropic(api_key=api_key)
     resp = await client.messages.create(
         model=REWRITER_MODEL,
-        max_tokens=300,
+        max_tokens=600,
         system=REWRITE_SYSTEM_PROMPT,
         messages=_build_messages(user_prompt),
     )

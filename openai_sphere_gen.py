@@ -31,11 +31,15 @@ OPENAI_QUALITY = "high"
 
 Feature = Literal["initial_gen", "bg_reroll", "variants_preview"]
 
-# Three jobs in priority order: (1) anchor equirect projection so the result
-# wraps + domes correctly, (2) anchor photographic quality so the model pulls
-# from photo-trained weights, (3) steer away from dense-mechanical-detail
-# hallucinations (mixing desks, lab gear, cockpits — gpt-image-2's weakest mode).
+# Two jobs in order of importance:
+# 1. Anchor projection so the result wraps + domes correctly as an equirect.
+# 2. Anchor photographic quality so the model pulls from photo-trained weights.
 # Mirrors SEAM_PROMPT_PREFIX in openai_sphere_test.py; keep both in sync.
+#
+# The previous "Composition: keep mid-ground clean / no fragmented mechanical
+# micro-detail" steer was removed — it was demoting the user's central subject
+# (mixing console, lab gear, etc.) and hurting outputs where the user actually
+# wanted that gear rendered. Detail steering belongs in the rewriter now.
 EQUIRECT_PROMPT_PREFIX = (
     # 1. Projection
     "Generate a 360-degree equirectangular (cylindrical equidistant projection) "
@@ -43,15 +47,9 @@ EQUIRECT_PROMPT_PREFIX = (
     "panorama: the left and right edges must wrap continuously, with no warping "
     "at the zenith or nadir poles. "
     # 2. Photographic quality anchor
-    "Photographic style: high-end architectural interior photography in the "
-    "manner of Architectural Digest. Captured on a professional 360 panoramic "
-    "camera with natural ambient and key lighting. Real-camera color, exposure, "
-    "and depth. Materials and finishes are photographically faithful. "
-    # 3. Detail-reduction steer
-    "Composition: keep mid-ground and background surfaces clean and "
-    "uncluttered. Detail should come from materials, light, and form — not "
-    "from dense rows of small controls, illegible readouts, busy rack gear, "
-    "or fragmented mechanical micro-detail. "
+    "Ultra-hd photographic quality. Captured on a professional 360 panoramic "
+    "camera with real-camera color, exposure, and depth. Materials and finishes "
+    "are photographically faithful. "
     # Anti-text
     "No text, letters, words, signs, labels, logos, watermarks, or typography. "
     "Scene: "
