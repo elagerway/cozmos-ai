@@ -306,7 +306,7 @@ export function RerollBackgroundModal({
                   ? "Single full render."
                   : "4 × 8K previews (~90s). Pick one → full 16K render."}
                 {" "}
-                Fast path: gpt-image-2 + fal ESRGAN 4× (interiors only — outdoor scenes warp at the poles).
+                OpenAI path: Claude rewrites your prompt → gpt-image-2 → fal ESRGAN 4× → tiles. Interiors only — outdoor scenes warp at the poles.
               </p>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -318,18 +318,18 @@ export function RerollBackgroundModal({
                 <button
                   onClick={() => startFlow("openai")}
                   disabled={!prompt.trim()}
-                  title="OpenAI gpt-image-2 + fal ESRGAN 4× — ~30s. Best for interior scenes; outdoor scenes lose correct polar projection."
+                  title="OpenAI: Claude-rewritten prompt → gpt-image-2 → fal ESRGAN 4×. ~3 min. Best for interior scenes with rich named subjects (studio, library, lab, lounge); outdoor scenes lose correct polar projection."
                   className="rounded-lg border border-emerald-400 bg-emerald-500/15 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500/25 disabled:opacity-40"
                 >
-                  Re-roll fast (OpenAI ~30s)
+                  Re-roll via OpenAI
                 </button>
                 <button
                   onClick={() => startFlow("blockade")}
                   disabled={!prompt.trim()}
-                  title="Blockade Skybox AI — ~3 min. Best overall quality and only path that handles outdoor/sky scenes correctly."
+                  title="Blockade Skybox AI — ~3 min. Native 16K, handles outdoor/sky scenes correctly. Default choice."
                   className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-400 disabled:opacity-40"
                 >
-                  {skipVariants ? "Re-roll (Blockade ~3min)" : "Generate 4 variants (Blockade)"}
+                  {skipVariants ? "Re-roll via Blockade" : "Generate 4 variants (Blockade)"}
                 </button>
               </div>
             </div>
